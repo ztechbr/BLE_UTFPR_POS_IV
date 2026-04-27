@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ESP32 Monitor"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnBle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Conectar via BLE" />
+
+    <Button
+        android:id="@+id/btnClassic"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Conectar via Bluetooth Clássico" />
+
+    <TextView
+        android:id="@+id/txtStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Status: desconectado"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/txtDados"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Aguardando dados..."
+        android:textSize="20sp"
+        android:paddingTop="20dp" />
+
+</LinearLayout>
