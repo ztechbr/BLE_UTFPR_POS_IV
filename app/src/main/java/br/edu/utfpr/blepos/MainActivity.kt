@@ -1,409 +1,263 @@
 package br.edu.utfpr.blepos
 
 import android.Manifest
-import android.bluetooth.*
-import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanResult
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.widget.Button
-import android.widget.TextView
-import android.annotation.SuppressLint
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.util.UUID
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.animation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
-    private lateinit var btnBle: Button
-    private lateinit var btnClassic: Button
-    private lateinit var txtStatus: TextView
-    private lateinit var txtDados: TextView
-
-    private var bleGatt: BluetoothGatt? = null
-    private var bufferBle = ""
-    private var classicSocket: BluetoothSocket? = null
-    private var bleConectado = false
-    private var btClassicoConectado = false
-
-    private val bluetoothAdapter: BluetoothAdapter? by lazy {
-        val manager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
-        manager.adapter
-    }
-
-    private val bleDeviceName = "ESP32_MONITOR_BLE"
-    private val classicDeviceName = "ESP32_MONITOR_BT"
-
-    private val serviceUuid =
-        UUID.fromString("12345678-1234-1234-1234-1234567890ab")
-
-    private val characteristicUuid =
-        UUID.fromString("abcd1234-1234-1234-1234-abcdef123456")
-
-    private val sppUuid =
-        UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    private val viewModel: BluetoothViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        btnBle = findViewById(R.id.btnBle)
-        btnClassic = findViewById(R.id.btnClassic)
-        txtStatus = findViewById(R.id.txtStatus)
-        txtDados = findViewById(R.id.txtDados)
-
-        pedirPermissoes()
-
-        btnBle.setOnClickListener {
-            if (bleConectado) {
-                desconectarBle()
-            } else {
-                conectarBle()
-            }
-        }
-
-        btnClassic.setOnClickListener {
-            if (btClassicoConectado) {
-                desconectarBluetoothClassico()
-            } else {
-                conectarBluetoothClassico()
-            }
-        }
-    }
-
-    private fun pedirPermissoes() {
-
-        val permissoes = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            permissoes.add(Manifest.permission.BLUETOOTH_SCAN)
-            permissoes.add(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-
-        ActivityCompat.requestPermissions(
-            this,
-            permissoes.toTypedArray(),
-            100
-        )
-    }
-
-    private fun temPermissao(): Boolean {
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            val scanOk = ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.BLUETOOTH_SCAN
-            ) == PackageManager.PERMISSION_GRANTED
-
-            val connectOk = ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.BLUETOOTH_CONNECT
-            ) == PackageManager.PERMISSION_GRANTED
-
-            return scanOk && connectOk
-        }
-
-        return ActivityCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    // -------------------------------------------------------------------------
-    // BLE
-    // -------------------------------------------------------------------------
-    @SuppressLint("MissingPermission")
-    private fun conectarBle() {
-        if (!temPermissao()) {
-            pedirPermissoes()
-            return
-        }
-
-        txtStatus.text = "Status: procurando BLE..."
-
-        val scanner = bluetoothAdapter?.bluetoothLeScanner
-
-        scanner?.startScan(object : ScanCallback() {
-
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val device = result.device
-
-                val nomeDevice = device.name
-                val nomeScan = result.scanRecord?.deviceName
-
-                val nomeEncontrado = nomeDevice ?: nomeScan ?: ""
-
-                if (nomeEncontrado.contains("ESP32", ignoreCase = true)) {
-                    scanner.stopScan(this)
-
-                    runOnUiThread {
-                        txtStatus.text = "Status: BLE encontrado: $nomeEncontrado"
-                    }
-
-                    conectarGatt(device)
+        setContent {
+            MaterialTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    BluetoothScreen(viewModel)
                 }
             }
+        }
+    }
+}
 
-            override fun onScanFailed(errorCode: Int) {
-                runOnUiThread {
-                    txtStatus.text = "Erro no scan BLE: $errorCode"
-                }
-            }
-        })
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BluetoothScreen(viewModel: BluetoothViewModel) {
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    val requiredPermissions = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun conectarGatt(device: BluetoothDevice) {
-        if (!temPermissao()) {
-            pedirPermissoes()
-            return
-        }
-
-        bleGatt?.close()
-        bleGatt = null
-
-        runOnUiThread {
-            txtStatus.text = "Status: conectando GATT BLE..."
-        }
-
-        bleGatt = device.connectGatt(
-            this,
-            false,
-            gattCallback,
-            BluetoothDevice.TRANSPORT_LE
+    var hasPermissions by remember {
+        mutableStateOf(
+            requiredPermissions.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
         )
     }
-    @SuppressLint("MissingPermission")
-    private fun desconectarBle() {
-        bleGatt?.disconnect()
-        bleGatt?.close()
-        bleGatt = null
 
-        bleConectado = false
-
-        runOnUiThread {
-            txtStatus.text = "Status: BLE desconectado pelo usuario"
-            btnBle.text = "Conectar via BLE"
-        }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        hasPermissions = results.values.all { it }
     }
 
-    private val gattCallback = object : BluetoothGattCallback() {
-
-        @SuppressLint("MissingPermission")
-        override fun onConnectionStateChange(
-            gatt: BluetoothGatt,
-            status: Int,
-            newState: Int
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("ESP32 IoT Monitor", fontWeight = FontWeight.ExtraBold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(20.dp)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-
-                runOnUiThread {
-                    txtStatus.text = "Status: BLE conectado. Procurando servicos..."
-                }
-
-                Thread.sleep(600)
-
-                // Solicita aumento do pacote BLE
-                gatt.requestMtu(100)
-
-                Thread.sleep(300)
-
-                // Agora busca os serviços
-                gatt.discoverServices()
-
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-
-                bleConectado = false
-
-                runOnUiThread {
-                    txtStatus.text = "Status: BLE desconectado. Codigo: $status"
-                    btnBle.text = "Conectar via BLE"
-                }
-
-                gatt.close()
-                bleGatt = null
-            }
-        }
-
-        @SuppressLint("MissingPermission")
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                runOnUiThread {
-                    txtStatus.text = "Erro ao descobrir servicos BLE: $status"
-                    btnBle.text = "Conectar via BLE"
-                }
-
-                bleConectado = false
-                return
-            }
-
-            val service = gatt.getService(serviceUuid)
-
-            if (service == null) {
-                runOnUiThread {
-                    txtStatus.text = "Servico BLE nao encontrado"
-                    btnBle.text = "Conectar via BLE"
-                }
-
-                bleConectado = false
-                return
-            }
-
-            val characteristic = service.getCharacteristic(characteristicUuid)
-
-            if (characteristic == null) {
-                runOnUiThread {
-                    txtStatus.text = "Caracteristica BLE nao encontrada"
-                    btnBle.text = "Conectar via BLE"
-                }
-
-                bleConectado = false
-                return
-            }
-
-            gatt.setCharacteristicNotification(characteristic, true)
-
-            val descriptor = characteristic.getDescriptor(
-                UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+            // Seção de Conexões
+            Text(
+                text = "Comunicação",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
             )
 
-            if (descriptor != null) {
-                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(descriptor)
-            }
-
-            bleConectado = true
-
-            runOnUiThread {
-                txtStatus.text = "Status: BLE conectado e recebendo dados..."
-                btnBle.text = "Desconectar BLE"
-            }
-        }
-
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
-            val texto = characteristic.value.toString(Charsets.UTF_8)
-
-            bufferBle += texto
-
-            if (bufferBle.contains("\n")) {
-                val mensagemCompleta = bufferBle.substringBefore("\n")
-                bufferBle = bufferBle.substringAfter("\n", "")
-
-                atualizarTela(mensagemCompleta)
-            }
-        }
-    }
-    // -------------------------------------------------------------------------
-    // BLUETOOTH CLASSICO
-    // -------------------------------------------------------------------------
-
-    @SuppressLint("MissingPermission")
-    private fun conectarBluetoothClassico() {
-        if (!temPermissao()) {
-            pedirPermissoes()
-            return
-        }
-
-        txtStatus.text = "Status: procurando Bluetooth clássico..."
-
-        val device = bluetoothAdapter
-            ?.bondedDevices
-            ?.firstOrNull { it.name == classicDeviceName }
-
-        if (device == null) {
-            txtStatus.text =
-                "Status: pareie primeiro com ESP32_MONITOR_BT nas configurações do Android"
-            return
-        }
-
-        Thread {
-            try {
-                classicSocket = device.createRfcommSocketToServiceRecord(sppUuid)
-                classicSocket?.connect()
-
-                btClassicoConectado = true
-
-                runOnUiThread {
-                    txtStatus.text = "Status: Bluetooth clássico conectado"
-                    btnClassic.text = "Desconectar Bluetooth Clássico"
-                }
-
-                val reader = BufferedReader(
-                    InputStreamReader(classicSocket!!.inputStream)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConnectionButton(
+                    label = "BLE",
+                    isConnected = viewModel.bleConectado,
+                    onClick = {
+                        if (hasPermissions) viewModel.toggleBleConnection()
+                        else permissionLauncher.launch(requiredPermissions)
+                    },
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.BluetoothAudio
                 )
 
-                while (btClassicoConectado) {
-                    val linha = reader.readLine()
+                ConnectionButton(
+                    label = "Clássico",
+                    isConnected = viewModel.btClassicoConectado,
+                    onClick = {
+                        if (hasPermissions) viewModel.toggleClassicConnection()
+                        else permissionLauncher.launch(requiredPermissions)
+                    },
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.SettingsBluetooth
+                )
+            }
 
-                    if (linha != null) {
-                        atualizarTela(linha)
-                    }
-                }
-
-            } catch (e: Exception) {
-                btClassicoConectado = false
-                classicSocket = null
-
-                runOnUiThread {
-                    txtStatus.text = "Bluetooth clássico desconectado"
-                    btnClassic.text = "Conectar via Bluetooth Clássico"
+            // Status Badge
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = viewModel.status,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 }
             }
-        }.start()
-    }
 
-    private fun desconectarBluetoothClassico() {
-        try {
-            btClassicoConectado = false
-            classicSocket?.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        classicSocket = null
+            // Seção de Dados (Tabela)
+            Text(
+                text = "Leituras do Sensor",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
 
-        runOnUiThread {
-            txtStatus.text = "Status: Bluetooth clássico desconectado pelo usuário"
-            btnClassic.text = "Conectar via Bluetooth Clássico"
-        }
-    }
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val contentColor = if (viewModel.estaComunicando) 
+                        MaterialTheme.colorScheme.onSurface 
+                    else 
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
 
-    // -------------------------------------------------------------------------
-    // ATUALIZAR TELA
-    // -------------------------------------------------------------------------
-
-    private fun atualizarTela(jsonTexto: String) {
-        runOnUiThread {
-            try {
-                val json = JSONObject(jsonTexto)
-
-                val temp = json.getDouble("temp")
-                val hum = json.getDouble("hum")
-                val voltage = json.getDouble("voltage")
-                val current = json.getDouble("current")
-                val power = json.getDouble("power")
-
-                txtDados.text = """
-                    Temperatura: $temp °C
-                    Umidade: $hum %
-                    Tensão: $voltage V
-                    Corrente: $current mA
-                    Potência: $power mW
-                """.trimIndent()
-
-            } catch (e: Exception) {
-                txtDados.text = jsonTexto
+                    DataRow(label = "Temperatura", value = viewModel.temperatura, color = contentColor)
+                    DataRow(label = "Umidade", value = viewModel.umidade, color = contentColor)
+                    DataRow(label = "Tensão", value = viewModel.tensao, color = contentColor)
+                    DataRow(label = "Corrente", value = viewModel.corrente, color = contentColor)
+                    DataRow(label = "Potência", value = viewModel.potencia, color = contentColor)
+                }
             }
+
+            // Mensagem de Última Atualização
+            AnimatedVisibility(
+                visible = viewModel.ultimaAtualizacao.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = viewModel.ultimaAtualizacao,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasPermissions) {
+            permissionLauncher.launch(requiredPermissions)
+        }
+    }
+}
+
+@Composable
+fun DataRow(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = color,
+            fontWeight = FontWeight.Medium
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = color,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.End
+        )
+    }
+}
+
+@Composable
+fun ConnectionButton(
+    label: String,
+    isConnected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector
+) {
+    if (isConnected) {
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+        ) {
+            Icon(Icons.Default.LinkOff, contentDescription = null)
+            Spacer(Modifier.width(4.dp))
+            Text("Parar $label")
+        }
+    } else {
+        FilledTonalButton(
+            onClick = onClick,
+            modifier = modifier
+        ) {
+            Icon(icon, contentDescription = null)
+            Spacer(Modifier.width(4.dp))
+            Text(label)
         }
     }
 }
