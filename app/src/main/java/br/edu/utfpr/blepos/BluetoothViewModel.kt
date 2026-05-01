@@ -27,7 +27,7 @@ import java.util.*
  *
  * 2. BLUETOOTH LOW ENERGY (BLE):
  *    - Funciona por "eventos". A gente não fica a ler o tempo inteiro, o Android avisa quando o valor muda.
- *    - É bem mais econômico, mas chato de configurar (precisa negociar MTU e Descritores).
+ *    - É bem mais econômico, porem precisa negociar MTU e Descritores.
  *    - O fluxo aqui é: Conectar -> Negociar pacote (MTU) -> Descobrir Serviços -> Habilitar Notificações.
  *    - Baseado em eventos e notificações GATT.
  * */
