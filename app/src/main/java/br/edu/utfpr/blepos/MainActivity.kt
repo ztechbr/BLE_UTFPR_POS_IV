@@ -24,7 +24,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
@@ -102,7 +101,7 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
         ) {
             // Seção de Conexões
             Text(
-                text = "Comunicação",
+                text = "Comunicação com ESP32",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -182,22 +181,74 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                     DataRow(label = "Tensão", value = viewModel.tensao, color = contentColor)
                     DataRow(label = "Corrente", value = viewModel.corrente, color = contentColor)
                     DataRow(label = "Potência", value = viewModel.potencia, color = contentColor)
+                    DataRow(label = "Diagnóstico", value = viewModel.diagnosticoSensores, color = contentColor)
                 }
             }
-
-            // Mensagem de Última Atualização
+            //  Última atualização do ESP32
             AnimatedVisibility(
-                visible = viewModel.ultimaAtualizacao.isNotEmpty(),
+                visible = viewModel.ultimaAtualizacaoEsp32.isNotEmpty(),
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = viewModel.ultimaAtualizacaoEsp32,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
+            // INICIO ALTERACAO - Seção API
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Text(
+                text = "Conexão API",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            ConnectionButton(
+                label = "API",
+                isConnected = viewModel.apiEnvioAtivo,
+                onClick = { viewModel.toggleEnvioApi() },
+                modifier = Modifier.fillMaxWidth(),
+                icon = Icons.Default.CloudUpload
+            )
+
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = viewModel.ultimaAtualizacao,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
+                        text = viewModel.statusApi,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
+            }
+            AnimatedVisibility(
+                visible = viewModel.ultimaAtualizacaoApi.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Text(
+                    text = viewModel.ultimaAtualizacaoApi,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }

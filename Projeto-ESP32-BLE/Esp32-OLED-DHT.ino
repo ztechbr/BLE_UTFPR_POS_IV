@@ -23,6 +23,10 @@
 
 #include "BluetoothSerial.h"
 
+#include "esp_task_wdt.h"
+#include "esp_system.h"
+#include "Preferences.h"
+
 // -----------------------------------------------------------------------------
 // OLED
 // -----------------------------------------------------------------------------
@@ -88,6 +92,14 @@ float hum = 0;
 float busVoltage = 0;
 float current_mA = 0;
 float power_mW = 0;
+//Inicio Alteracao
+// Flags de erro dos sensores
+bool tempErro = false;
+bool humErro = false;
+bool inaErro = false;
+// Se o display OLED falhar, o ESP32 continua enviando dados por BLE/BT.
+bool oledErro = false;
+// fim alteracao
 
 // -----------------------------------------------------------------------------
 // CALLBACK BLE
@@ -123,10 +135,14 @@ void setup() {
   dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
 
   // OLED
+  // INICIO ALTERACAO - Não travar o ESP32 se o OLED falhar
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
-    Serial.println("Erro ao iniciar OLED");
-    while (true);
+    Serial.println("ERRO: OLED nao encontrado. Sistema continua transmitindo.");
+    oledErro = true;
+  } else {
+    oledErro = false;
   }
+  // FIM ALTERACAO
 
   // INA219
   if (!ina219.begin()) {
@@ -144,7 +160,8 @@ void setup() {
 
   // BLE
   BLEDevice::init(BLE_DEVICE_NAME);
-  BLEDevice::setMTU(100);
+  // Aumenta o MTU para enviar JSON maior por BLE
+  BLEDevice::setMTU(247);
 
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -168,18 +185,21 @@ void setup() {
   pAdvertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("ESP32 Monitor");
-  display.println("DHT22 + INA219");
-  display.println("BLE + BT Classico");
-  display.display();
+  // INICIO ALTERACAO - Só escreve no OLED se ele estiver funcionando
+  if (!oledErro) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("ESP32 Monitor");
+    display.println("DHT22 + INA219");
+    display.println("BLE + BT Classico");
+    display.display();
 
-  delay(2000);
+    delay(2000);
+  }
+  
 }
-
 // -----------------------------------------------------------------------------
 // loop()
 // -----------------------------------------------------------------------------
@@ -203,18 +223,76 @@ void loop() {
 }
 
 // -----------------------------------------------------------------------------
+// VERIFICA SE DISPOSITIVO I2C EXISTE
+// -----------------------------------------------------------------------------
+bool dispositivoI2CExiste(byte endereco) {
+  Wire.beginTransmission(endereco);
+  byte erro = Wire.endTransmission();
+
+  return (erro == 0);
+}
+
+// -----------------------------------------------------------------------------
 // LER SENSORES
 // -----------------------------------------------------------------------------
 
 void lerSensores() {
   TempAndHumidity data = dhtSensor.getTempAndHumidity();
 
-  temp = data.temperature;
-  hum = data.humidity;
+  // ---------------------------
+  // Diagnóstico do DHT22
+  // ---------------------------
+  tempErro = isnan(data.temperature);
+  humErro  = isnan(data.humidity);
 
-  busVoltage = ina219.getBusVoltage_V();
-  current_mA = ina219.getCurrent_mA();
-  power_mW = ina219.getPower_mW();
+  if (tempErro) {
+    temp = -9999;
+    Serial.println("ERRO: DHT22 - Temperatura invalida");
+  } else {
+    temp = data.temperature;
+  }
+
+  if (humErro) {
+    hum = -9999;
+    Serial.println("ERRO: DHT22 - Umidade invalida");
+  } else {
+    hum = data.humidity;
+  }
+
+  // ---------------------------
+  // Leitura e diagnóstico do INA219
+  // ---------------------------
+
+  // O INA219 normalmente usa endereço I2C 0x40.
+  // Primeiro verificamos se ele responde no barramento I2C.
+  bool inaPresente = dispositivoI2CExiste(0x40);
+
+  if (!inaPresente) {
+    // Sensor não respondeu no I2C: considerar falha real.
+    inaErro = true;
+
+    busVoltage = -9999;
+    current_mA = -9999;
+    power_mW = -9999;
+
+    Serial.println("ERRO: INA219 nao encontrado no barramento I2C");
+  } else {
+    // Sensor respondeu: agora faz a leitura normal.
+    busVoltage = ina219.getBusVoltage_V();
+    current_mA = ina219.getCurrent_mA();
+    power_mW = ina219.getPower_mW();
+
+    // Mesmo presente, ainda validamos se a leitura veio inválida.
+    inaErro = isnan(busVoltage) || isnan(current_mA) || isnan(power_mW);
+
+    if (inaErro) {
+      busVoltage = -9999;
+      current_mA = -9999;
+      power_mW = -9999;
+
+      Serial.println("ERRO: INA219 - Leitura invalida");
+    }
+  }
 
   digitalWrite(LED_BLE, bleConnected ? HIGH : LOW);
 
@@ -240,8 +318,20 @@ void enviarDados() {
   json += "\"hum\":" + String(hum, 0) + ",";
   json += "\"voltage\":" + String(busVoltage, 2) + ",";
   json += "\"current\":" + String(current_mA, 1) + ",";
-  json += "\"power\":" + String(power_mW, 1);
+  //inicio alteracao
+  json += "\"power\":" + String(power_mW, 1) + ",";
+
+  // Status dos sensores para diagnóstico no Android
+  json += "\"tempErro\":" + String(tempErro ? 1 : 0) + ",";
+  json += "\"humErro\":" + String(humErro ? 1 : 0) + ",";
+  json += "\"inaErro\":" + String(inaErro ? 1 : 0) + ",";
+  // Informa ao Android que o OLED está com falha
+  json += "\"oledErro\":" + String(oledErro ? 1 : 0);
+  // FIM ALTERACAO
   json += "}";
+
+  Serial.print("Tamanho JSON: ");
+  Serial.println(json.length());
 
   Serial.println(json);
 
@@ -263,6 +353,12 @@ void enviarDados() {
 // -----------------------------------------------------------------------------
 
 void atualizarDisplay() {
+  // INICIO ALTERACAO - Se OLED falhou, não tenta atualizar a tela
+  // Isso evita travamentos e mantém BLE/BT funcionando.
+  if (oledErro) {
+    return;
+  }
+  // FIM ALTERACAO
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
@@ -289,35 +385,61 @@ void atualizarDisplay() {
   display.setCursor(0, 16);
   display.print("Temp:");
 
-  display.setCursor(70, 16);
+  display.setCursor(80, 16);
   display.print("Umid:");
 
   display.setTextSize(2);
   display.setCursor(0, 27);
-  display.print(temp, 1);
 
+  //inicio Alteracao
+  if (tempErro) {
+    display.print(" ---");
+  } else {
+    display.print(temp, 1);
+    //fim alteracao
+  }
   // Simbolo grau vazado
   display.drawCircle(53, 29, 2, SSD1306_WHITE);
   display.setCursor(58, 27);
   display.print("C");
-
+  
   display.setCursor(82, 27);
-  display.print(hum, 0);
-  display.print("%");
+
+  //inicio Alteracao
+  if (humErro) {
+    display.print("---");
+  } else {
+    display.print(hum, 0);
+    display.print("%");
+  }
+  //fim alteracao
 
   // Corrente e tensao
   display.setTextSize(1);
-  display.setCursor(0, 55);
-  display.print(busVoltage, 2);
-  display.print("V ");
 
-  display.setCursor(40, 55);
-  display.print(current_mA, 1);
-  display.print("mA ");
+  //inicio Alteracao
+  if (inaErro) {
+    display.setCursor(0, 55);
+    display.print("---V");
 
-  display.setCursor(90, 55);
-  display.print(power_mW, 0);
-  display.print("mW");
+    display.setCursor(40, 55);
+    display.print("---mA");
 
+    display.setCursor(90, 55);
+    display.print("---mW");
+  } else {
+    display.setCursor(0, 55);
+    display.print(busVoltage, 2);
+    display.print("V ");
+
+    display.setCursor(40, 55);
+    display.print(current_mA, 1);
+    display.print("mA ");
+
+    display.setCursor(90, 55);
+    display.print(power_mW, 0);
+    display.print("mW");
+  }
+  //fim alteracao
   display.display();
 }
