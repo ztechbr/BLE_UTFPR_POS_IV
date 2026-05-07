@@ -60,7 +60,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
     var potencia by mutableStateOf("--")
         private set
     // Diagnostico recebido do ESP32
-    var diagnosticoSensores by mutableStateOf("Diagnóstico: aguardando dados")
+    var diagnosticoSensores by mutableStateOf("...aguardando dados")
         private set
     var statusApi by mutableStateOf("API: aguardando envio")
         private set
@@ -69,6 +69,11 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         private set
     var ultimaAtualizacaoApi by mutableStateOf("")
         private set
+    var ultimoJsonApi by mutableStateOf("{}")
+        private set
+
+    var ultimoCodigoHttpApi by mutableStateOf("--")
+        private set
     // Watchdog da comunicação com ESP32
     var ultimaAtualizacaoEsp32 by mutableStateOf("")
         private set
@@ -76,6 +81,18 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         private set
     var btClassicoConectado by mutableStateOf(false)
         private set
+    var tempFalha by mutableStateOf(false)
+        private set
+
+    var humFalha by mutableStateOf(false)
+        private set
+
+    var inaFalha by mutableStateOf(false)
+        private set
+
+    var oledFalha by mutableStateOf(false)
+        private set
+
     private var ultimoRecebimentoEsp32Ms = 0L
     private val timeoutComunicacaoEsp32Ms = 60_000L
 
@@ -91,7 +108,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                 status = "Erro de Comunicação com ESP32 (watchdog)"
                 bleConectado = false
                 btClassicoConectado = false
-                diagnosticoSensores = "Diagnóstico: erro de comunicação"
+                diagnosticoSensores = "Erro de comunicação"
 
                 temperatura = "---"
                 umidade = "---"
@@ -354,6 +371,10 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             val inaErro = json.optInt("inaErro", 0) == 1
             val oledErro = json.optInt("oledErro", 0) == 1
             // FIM ALTERACAO
+            tempFalha = tempErro
+            humFalha = humErro
+            inaFalha = inaErro
+            oledFalha = oledErro
 
             // INICIO ALTERACAO - Mostra "---" quando o valor não é válido
             temperatura = if (tempErro || tempValor == -9999.0) {
@@ -387,9 +408,9 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             if (oledErro) falhas.add("OLED")
 
             diagnosticoSensores = if (falhas.isEmpty()) {
-                "Diagnóstico: sensores OK"
+                "Sensores OK"
             } else {
-                "Diagnóstico: falha em ${falhas.joinToString(", ")}"
+                "Sensores com Falha"
             }
             // FIM ALTERACAO
 
@@ -410,7 +431,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             )
 
         } catch (e: Exception) {
-            diagnosticoSensores = "Diagnóstico: erro ao interpretar JSON"
+            diagnosticoSensores = "Erro ao interpretar JSON"
         }
     }
     // Envia leitura recebida do ESP32 para API REST
@@ -442,12 +463,14 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         val dataFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val horaFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
-        val tempApi = if (tempErro) -9999.0 else tempValor
-        val humApi = if (humErro) -9999.0 else humValor
+        // Mesmo com erro de sensor, continua enviando para a API.
+        // Apenas substitui o valor inválido por -9999.
+        val tempApi = if (tempErro || tempValor == -9999.0) -9999.0 else tempValor
+        val humApi = if (humErro || humValor == -9999.0) -9999.0 else humValor
 
-        val tensaoApi = if (inaErro) -9999.0 else voltageValor
-        val correnteApi = if (inaErro) -9999.0 else currentValor
-        val potenciaApi = if (inaErro) -9999.0 else powerValor
+        val tensaoApi = if (inaErro || voltageValor == -9999.0) -9999.0 else voltageValor
+        val correnteApi = if (inaErro || currentValor == -9999.0) -9999.0 else currentValor
+        val potenciaApi = if (inaErro || powerValor == -9999.0) -9999.0 else powerValor
 
         // JSON no mesmo formato testado no PowerShell.
         val jsonApi = JSONObject().apply {
@@ -480,7 +503,15 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             put("scorrente", correnteApi)
             put("spotencia", potenciaApi)
         }
+        // Guarda o último JSON enviado para exibir na tela de diagnóstico da API
+        ultimoJsonApi = jsonApi.toString(4)
 
+        // Mostra na tela que o envio será feito mesmo com sensor em erro.
+        statusApi = if (tempErro || humErro || inaErro) {
+            "API: enviando com sensor em falha"
+        } else {
+            "API: enviando..."
+        }
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val body = jsonApi.toString().toRequestBody(mediaType)
 
@@ -489,12 +520,14 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             .post(body)
             .build()
 
-        statusApi = "API: enviando..."
-
         httpClient.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 mainHandler.post {
+                    val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
                     statusApi = "API: erro no envio"
+                    ultimaAtualizacaoApi = "Último envio API (FALHA) às ${sdf.format(Date())}"
+                    ultimoCodigoHttpApi = "FALHA"
                 }
             }
 
@@ -503,9 +536,18 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                     val resposta = it.body?.string() ?: ""
 
                     mainHandler.post {
+                        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+                        // SEMPRE atualiza o horário (independente de erro ou sucesso)
+                        ultimaAtualizacaoApi = if (it.isSuccessful) {
+                            "Último envio API (OK) às ${sdf.format(Date())}"
+                        } else {
+                            "Último envio API (ERRO ${it.code}) às ${sdf.format(Date())}"
+                        }
+
+                        ultimoCodigoHttpApi = it.code.toString()
+
                         statusApi = if (it.isSuccessful) {
-                            val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                            ultimaAtualizacaoApi = "Último envio API às ${sdf.format(Date())}"
                             "API: enviado OK (${it.code})"
                         } else {
                             "API: erro HTTP ${it.code}"

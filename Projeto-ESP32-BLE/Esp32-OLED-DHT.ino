@@ -258,7 +258,14 @@ void lerSensores() {
   } else {
     hum = data.humidity;
   }
+  // ---------------------------
+  // Diagnóstico do OLED
+  // ---------------------------
+  oledErro = !dispositivoI2CExiste(OLED_ADDRESS);
 
+  if (oledErro) {
+    Serial.println("ERRO: OLED nao encontrado no barramento I2C");
+  }
   // ---------------------------
   // Leitura e diagnóstico do INA219
   // ---------------------------

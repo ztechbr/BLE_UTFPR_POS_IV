@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -79,6 +80,11 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
     ) { results ->
         hasPermissions = results.values.all { it }
     }
+    var mostrarDiagnostico by remember { mutableStateOf(false) }
+
+    var mostrarDiagnosticoApi by remember { mutableStateOf(false) }
+
+    var menuAberto by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -87,7 +93,44 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                ),
+                actions = {
+                    IconButton(onClick = { menuAberto = true }) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Menu"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = menuAberto,
+                        onDismissRequest = { menuAberto = false }
+                    ) {
+                        // Chama tela de diagnóstico do ESP32
+                        DropdownMenuItem(
+                            text = { Text("Diagnóstico") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Info, contentDescription = null)
+                            },
+                            onClick = {
+                                menuAberto = false
+                                mostrarDiagnostico = true
+                            }
+                        )
+                        // Chama tela de diagnostico da API
+                        if (viewModel.apiEnvioAtivo)
+                        DropdownMenuItem(
+                            text = { Text("Diagnóstico da API") },
+                            leadingIcon = {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                            },
+                            onClick = {
+                                menuAberto = false
+                                mostrarDiagnosticoApi = true
+                            }
+                        )
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -99,6 +142,25 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ================= DIAGNÓSTICOS (SUBTELAS) =================
+
+            // Tela de diagnóstico dos sensores
+            if (mostrarDiagnostico) {
+                TelaDiagnostico(
+                    viewModel = viewModel,
+                    onVoltar = { mostrarDiagnostico = false }
+                )
+                return@Column
+            }
+
+            // Tela de diagnóstico da API
+            if (mostrarDiagnosticoApi) {
+                TelaDiagnosticoApi(
+                    viewModel = viewModel,
+                    onVoltar = { mostrarDiagnosticoApi = false }
+                )
+                return@Column
+            }
             // Seção de Conexões
             Text(
                 text = "Comunicação com ESP32",
@@ -168,7 +230,10 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                 elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier
+                        //.fillMaxSize()
+                        //.verticalScroll(rememberScrollState())
+                        .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     val contentColor = if (viewModel.estaComunicando) 
@@ -259,7 +324,107 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
         }
     }
 }
+@Composable
+fun TelaDiagnostico(
+    viewModel: BluetoothViewModel,
+    onVoltar: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Diagnóstico dos Sensores",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold
+        )
 
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DataRow("Temperatura", if (viewModel.tempFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
+                DataRow("Umidade", if (viewModel.humFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
+                DataRow("INA219", if (viewModel.inaFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
+                DataRow("OLED", if (viewModel.oledFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DataRow("BLE", viewModel.status, MaterialTheme.colorScheme.onSurface)
+                DataRow("API", viewModel.statusApi, MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        Button(
+            onClick = onVoltar,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Voltar")
+        }
+    }
+}
+
+@Composable
+fun TelaDiagnosticoApi(
+    viewModel: BluetoothViewModel,
+    onVoltar: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Diagnóstico da API",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold
+        )
+
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                DataRow("Envio API", if (viewModel.apiEnvioAtivo) "Habilitado" else "Desabilitado", MaterialTheme.colorScheme.onSurface)
+                DataRow("Status", viewModel.statusApi, MaterialTheme.colorScheme.onSurface)
+                DataRow("HTTP", viewModel.ultimoCodigoHttpApi, MaterialTheme.colorScheme.onSurface)
+                DataRow("Último envio", viewModel.ultimaAtualizacaoApi, MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        Text(
+            text = "Último JSON enviado",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = viewModel.ultimoJsonApi,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Button(
+            onClick = onVoltar,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Voltar")
+        }
+    }
+}
 @Composable
 fun DataRow(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
     Row(
