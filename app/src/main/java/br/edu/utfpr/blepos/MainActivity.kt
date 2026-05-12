@@ -246,6 +246,10 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                     DataRow(label = "Tensão", value = viewModel.tensao, color = contentColor)
                     DataRow(label = "Corrente", value = viewModel.corrente, color = contentColor)
                     DataRow(label = "Potência", value = viewModel.potencia, color = contentColor)
+                    DataRow(label = "Lux", value = viewModel.luximetro, color = contentColor)
+                    DataRow(label = "Latitude", value = viewModel.latitude, color = contentColor)
+                    DataRow(label = "Longitude", value = viewModel.longitude, color = contentColor)
+                    DataRow(label = "RSSI BLE", value = viewModel.rssiBle, color = contentColor)
                     DataRow(label = "Diagnóstico", value = viewModel.diagnosticoSensores, color = contentColor)
                 }
             }
@@ -345,10 +349,41 @@ fun TelaDiagnostico(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                DataRow("Temperatura", if (viewModel.tempFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
-                DataRow("Umidade", if (viewModel.humFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
-                DataRow("INA219", if (viewModel.inaFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
-                DataRow("OLED", if (viewModel.oledFalha) "FALHA" else "OK", MaterialTheme.colorScheme.onSurface)
+                DataRow(
+                    "Temperatura",
+                    if (viewModel.tempFalha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
+                DataRow(
+                    "Umidade",
+                    if (viewModel.humFalha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
+                DataRow(
+                    "INA219",
+                    if (viewModel.inaFalha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
+                DataRow(
+                    "OLED",
+                    if (viewModel.oledFalha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
+                DataRow(
+                    "BH1750",
+                    if (viewModel.bh1750Falha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
+                DataRow(
+                    "GPS",
+                    if (viewModel.gpsFalha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
+                DataRow(
+                    "RSSI BLE",
+                    if (viewModel.rssiFalha) "FALHA" else "OK",
+                    MaterialTheme.colorScheme.onSurface
+                )
             }
         }
 

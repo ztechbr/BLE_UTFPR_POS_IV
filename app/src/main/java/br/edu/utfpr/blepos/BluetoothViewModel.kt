@@ -2,7 +2,15 @@ package br.edu.utfpr.blepos
 
 import android.annotation.SuppressLint
 import android.app.Application
-import android.bluetooth.*
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothSocket
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.os.Build
@@ -12,6 +20,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import br.edu.utfpr.blepos.data.api.ApiPayloadMapper
+import br.edu.utfpr.blepos.data.esp32.Esp32Packet
+import br.edu.utfpr.blepos.data.esp32.Esp32PacketDecoder
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -20,11 +31,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.IOException
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 
 /*
  * --- RESUMO DAS TECNOLOGIAS BLUETOOTH NESTE APP ---
@@ -59,6 +70,27 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         private set
     var potencia by mutableStateOf("--")
         private set
+    var luximetro by mutableStateOf("--")
+        private set
+
+    var latitude by mutableStateOf("--")
+        private set
+
+    var longitude by mutableStateOf("--")
+        private set
+
+    var rssiBle by mutableStateOf("--")
+        private set
+
+    var bh1750Falha by mutableStateOf(false)
+        private set
+
+    var gpsFalha by mutableStateOf(false)
+        private set
+
+    var rssiFalha by mutableStateOf(false)
+        private set
+
     // Diagnostico recebido do ESP32
     var diagnosticoSensores by mutableStateOf("...aguardando dados")
         private set
@@ -175,24 +207,98 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+//    @SuppressLint("MissingPermission")
+//    private fun conectarBle() {
+//        status = "Status: procurando BLE..."
+//        val scanner = bluetoothAdapter?.bluetoothLeScanner ?: return
+//
+//        scanner.startScan(object : ScanCallback() {
+//            override fun onScanResult(callbackType: Int, result: ScanResult) {
+//                val device = result.device
+//                val nomeEncontrado = device.name ?: result.scanRecord?.deviceName ?: ""
+//
+//                if (nomeEncontrado.contains("ESP32", ignoreCase = true)) {
+//                    scanner.stopScan(this)
+//                    status = "Status: BLE encontrado"
+//                    conectarGatt(device)
+//                }
+//            }
+//        })
+//    }
+
     @SuppressLint("MissingPermission")
     private fun conectarBle() {
         status = "Status: procurando BLE..."
-        val scanner = bluetoothAdapter?.bluetoothLeScanner ?: return
 
-        scanner.startScan(object : ScanCallback() {
+        val scanner = bluetoothAdapter?.bluetoothLeScanner
+        if (scanner == null) {
+            status = "Erro: scanner BLE indisponível"
+            return
+        }
+
+        val scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
-                val nomeEncontrado = device.name ?: result.scanRecord?.deviceName ?: ""
+                val nomeDevice = device.name ?: ""
+                val nomeScan = result.scanRecord?.deviceName ?: ""
+                val endereco = device.address
+                val rssi = result.rssi
 
-                if (nomeEncontrado.contains("ESP32", ignoreCase = true)) {
+                android.util.Log.d(
+                    "BLE_SCAN",
+                    "Encontrado nomeDevice=$nomeDevice nomeScan=$nomeScan address=$endereco rssi=$rssi"
+                )
+
+                val serviceUuids = result.scanRecord?.serviceUuids
+
+                val encontrouUuid = serviceUuids?.any {
+                    it.uuid == serviceUuid
+                } == true
+
+                val encontrouNome =
+                    nomeDevice.contains("ESP32", ignoreCase = true) ||
+                            nomeScan.contains("ESP32", ignoreCase = true) ||
+                            nomeScan.contains("MONITOR", ignoreCase = true)
+
+                android.util.Log.d(
+                    "BLE_SCAN",
+                    "UUIDs encontrados=$serviceUuids encontrouUuid=$encontrouUuid"
+                )
+
+                val achouEsp32 = encontrouNome || encontrouUuid
+
+                if (achouEsp32) {
                     scanner.stopScan(this)
-                    status = "Status: BLE encontrado"
+
+                    status = if (encontrouUuid) {
+                        "Status: BLE encontrado por UUID"
+                    } else {
+                        "Status: BLE encontrado: ${nomeScan.ifBlank { nomeDevice }}"
+                    }
+
                     conectarGatt(device)
                 }
             }
-        })
+
+            override fun onScanFailed(errorCode: Int) {
+                status = "Erro no scan BLE: $errorCode"
+                android.util.Log.e("BLE_SCAN", "Scan falhou: $errorCode")
+            }
+        }
+
+        scanner.startScan(scanCallback)
+
+        mainHandler.postDelayed({
+            if (!bleConectado && status.contains("procurando", ignoreCase = true)) {
+                scanner.stopScan(scanCallback)
+                status = "BLE não encontrado. Verifique advertising do ESP32."
+            }
+        }, 15_000)
     }
+
+
+
+
 
     @SuppressLint("MissingPermission")
     private fun conectarGatt(device: BluetoothDevice) {
@@ -234,32 +340,81 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val service = gatt.getService(serviceUuid)
-                val characteristic = service?.getCharacteristic(characteristicUuid)
-
-                if (characteristic != null) {
-                    gatt.setCharacteristicNotification(characteristic, true)
-                    val descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
-                    
-                    if (descriptor != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                            @Suppress("DEPRECATION")
-                            gatt.writeDescriptor(descriptor)
-                        }
-                        this@BluetoothViewModel.status = "Status: habilitando notificações BLE..."
-                    }
-                }
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                bleConectado = false
+                this@BluetoothViewModel.status = "Erro: falha ao descobrir serviços BLE"
+                return
             }
+
+            val service = gatt.getService(serviceUuid)
+
+            if (service == null) {
+                bleConectado = false
+                this@BluetoothViewModel.status = "Erro: SERVICE_UUID não encontrado no ESP32"
+                android.util.Log.e("BLE_GATT", "Serviço não encontrado: $serviceUuid")
+                return
+            }
+
+            val characteristic = service.getCharacteristic(characteristicUuid)
+
+            if (characteristic == null) {
+                bleConectado = false
+                this@BluetoothViewModel.status = "Erro: CHARACTERISTIC_UUID não encontrada"
+                android.util.Log.e("BLE_GATT", "Característica não encontrada: $characteristicUuid")
+                return
+            }
+
+            val notificacaoAtivada = gatt.setCharacteristicNotification(characteristic, true)
+
+            if (!notificacaoAtivada) {
+                bleConectado = false
+                this@BluetoothViewModel.status = "Erro: não ativou notificação BLE"
+                return
+            }
+
+            val descriptor = characteristic.getDescriptor(
+                UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+            )
+
+            if (descriptor == null) {
+                bleConectado = false
+                this@BluetoothViewModel.status = "Erro: descriptor CCCD não encontrado"
+                android.util.Log.e("BLE_GATT", "Descriptor CCCD não encontrado")
+                return
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeDescriptor(
+                    descriptor,
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+
+                @Suppress("DEPRECATION")
+                gatt.writeDescriptor(descriptor)
+            }
+
+            this@BluetoothViewModel.status = "Status: habilitando notificações BLE..."
         }
 
-        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            val texto = String(value, Charsets.UTF_8)
-            processarDadosBle(texto)
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray
+        ) {
+            /*
+             * O ESP32 agora envia pacote binário.
+             * Não podemos mais converter o ByteArray para String.
+             *
+             * Antes:
+             *   val texto = String(value, Charsets.UTF_8)
+             *
+             * Agora:
+             *   enviamos os bytes diretamente para o decoder.
+             */
+            processarPacoteBinarioEsp32(value)
         }
         // Compatibilidade BLE para versões antigas do Android
         @Suppress("DEPRECATION")
@@ -267,8 +422,13 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
         ) {
-            val texto = characteristic.value?.toString(Charsets.UTF_8) ?: ""
-            processarDadosBle(texto)
+            /*
+             * Versão antiga do callback BLE, usada por algumas versões do Android.
+             * Mesmo aqui, o dado recebido também é binário.
+             */
+            val dados = characteristic.value ?: return
+
+            processarPacoteBinarioEsp32(dados)
         }
         @SuppressLint("MissingPermission")
         override fun onDescriptorWrite(
@@ -284,6 +444,412 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                 this@BluetoothViewModel.status = "Erro: BLE não habilitou notificações"
             }
         }
+    }
+//    private fun processarPacoteBinarioEsp32(bytes: ByteArray) {
+//        /*
+//         * Esta função recebe os bytes crus vindos do BLE.
+//         *
+//         * O pacote esperado tem 45 bytes:
+//         * - cabeçalho 0xAA 0x55
+//         * - dados dos sensores
+//         * - status dos erros
+//         * - CRC16 no final
+//         */
+//        status = "Pacote ESP32 recebido: ${bytes.size} bytes"
+//
+//        val packet = Esp32PacketDecoder.decode(bytes)
+//
+//        /*
+//         * Se packet == null, o decoder rejeitou o pacote.
+//         * Possíveis causas:
+//         * - tamanho diferente de 45 bytes
+//         * - cabeçalho diferente de 0xAA 0x55
+//         * - versão do protocolo diferente de 1
+//         */
+//        if (packet == null) {
+//            diagnosticoSensores = "Pacote ESP32 inválido"
+//            return
+//        }
+//
+//        /*
+//         * Se o CRC não bater, o pacote chegou corrompido.
+//         * Nesse caso não atualizamos a tela e não enviamos para API.
+//         */
+//        if (!packet.crcOk) {
+//            diagnosticoSensores = "CRC inválido - pacote descartado"
+//            return
+//        }
+//
+//        atualizarTelaComPacoteEsp32(packet)
+//    }
+
+    private fun processarPacoteBinarioEsp32(bytes: ByteArray) {
+        val hex = bytes.joinToString(" ") {
+            "%02X".format(it)
+        }
+
+        status = "Pacote ESP32 recebido: ${bytes.size} bytes"
+
+        android.util.Log.d("ESP32_BIN", "Bytes recebidos: ${bytes.size}")
+        android.util.Log.d("ESP32_BIN", "HEX: $hex")
+
+        val packet = Esp32PacketDecoder.decode(bytes)
+
+        if (packet == null) {
+            diagnosticoSensores =
+                "Pacote inválido: ${bytes.size} bytes"
+
+            android.util.Log.e(
+                "ESP32_BIN",
+                "Pacote inválido. Tamanho=${bytes.size}, HEX=$hex"
+            )
+            return
+        }
+
+        if (!packet.crcOk) {
+            diagnosticoSensores = "CRC inválido - pacote descartado"
+
+            android.util.Log.e(
+                "ESP32_BIN",
+                "CRC inválido. HEX=$hex"
+            )
+            return
+        }
+
+        atualizarTelaComPacoteEsp32(packet)
+    }
+
+    // fim do teste
+
+
+
+    private fun atualizarTelaComPacoteEsp32(packet: Esp32Packet) {
+        /*
+         * Atualiza as flags usadas na tela de diagnóstico.
+         */
+        tempFalha = packet.tempErro
+        humFalha = packet.humErro
+        inaFalha = packet.inaErro
+        oledFalha = packet.oledErro
+        bh1750Falha = packet.bh1750Erro
+        gpsFalha = packet.gpsErro
+        rssiFalha = packet.rssiErro
+
+        /*
+         * Atualiza temperatura e umidade.
+         */
+        temperatura = packet.temp?.let {
+            "%.1f °C".format(Locale.US, it)
+        } ?: "---"
+
+        umidade = packet.hum?.let {
+            "%.1f %%".format(Locale.US, it)
+        } ?: "---"
+
+        /*
+         * Atualiza dados do INA219.
+         */
+        if (packet.inaErro) {
+            tensao = "---"
+            corrente = "---"
+            potencia = "---"
+        } else {
+            tensao = packet.voltage?.let {
+                "%.2f V".format(Locale.US, it)
+            } ?: "---"
+
+            corrente = packet.current?.let {
+                "%.1f mA".format(Locale.US, it)
+            } ?: "---"
+
+            potencia = packet.power?.let {
+                "%.1f mW".format(Locale.US, it)
+            } ?: "---"
+        }
+        /*
+        * Luxímetro BH1750
+        */
+        luximetro = packet.lux?.let {
+            "%.1f lux".format(Locale.US, it)
+        } ?: "---"
+
+        /*
+         * GPS
+         */
+        latitude = packet.lat?.let {
+            "%.6f".format(Locale.US, it)
+        } ?: "---"
+
+        longitude = packet.lon?.let {
+            "%.6f".format(Locale.US, it)
+        } ?: "---"
+
+        /*
+         * RSSI BLE
+         */
+        rssiBle = packet.rssiEsp32Dbm?.let {
+            "%.1f dBm".format(Locale.US, it)
+        } ?: "---"
+
+        /*
+         * Monta diagnóstico textual.
+         */
+        val falhas = mutableListOf<String>()
+
+        if (packet.tempErro) falhas.add("temperatura")
+        if (packet.humErro) falhas.add("umidade")
+        if (packet.inaErro) falhas.add("INA219")
+        if (packet.oledErro) falhas.add("OLED")
+        if (packet.bh1750Erro) falhas.add("BH1750")
+        if (packet.gpsErro) falhas.add("GPS")
+        if (packet.rssiErro) falhas.add("RSSI")
+
+        diagnosticoSensores = if (falhas.isEmpty()) {
+            "Sensores OK - ${packet.tag} seq=${packet.seq}"
+        } else {
+            "Falha: ${falhas.joinToString(", ")}"
+        }
+
+        /*
+         * Atualiza watchdog da comunicação.
+         */
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        ultimaAtualizacaoEsp32 = "Última atualização com ESP32 às ${sdf.format(Date())}"
+        ultimoRecebimentoEsp32Ms = System.currentTimeMillis()
+
+        val tipoComunicacao = when {
+            bleConectado -> 1
+            btClassicoConectado -> 2
+            else -> 0
+        }
+
+        enviarPacoteEsp32ParaApi(packet, tipoComunicacao)
+    }
+    private fun enviarPacoteEsp32ParaApi(packet: Esp32Packet, tipoComunicacao: Int) {
+
+        // -------------------------------------------------------------------------
+        // VERIFICA SE O ENVIO PARA API ESTA HABILITADO
+        // -------------------------------------------------------------------------
+
+        // Permite desligar envio para API durante testes locais.
+        if (!apiEnvioAtivo) {
+
+            // Atualiza status mostrado na interface.
+            statusApi = "API: envio desligado"
+
+            return
+        }
+        // -------------------------------------------------------------------------
+        // CONTROLE DE TEMPO ENTRE ENVIOS
+        // -------------------------------------------------------------------------
+
+        // Tempo atual do celular em milissegundos.
+        val agoraMs = System.currentTimeMillis()
+
+        /*
+         * Proteção contra envio excessivo.
+         *
+         * Mesmo que o ESP32 envie pacotes muito rápido,
+         * o aplicativo limita o envio para a API.
+         *
+         * Exemplo:
+         * intervaloEnvioApiMs = 10000
+         * → envia no máximo 1 pacote a cada 10 segundos.
+         */
+        if (agoraMs - ultimoEnvioApi < intervaloEnvioApiMs) {
+            return
+        }
+
+        // Atualiza instante do último envio realizado.
+        ultimoEnvioApi = agoraMs
+
+
+        // -------------------------------------------------------------------------
+        // CONVERSAO DO PACOTE PARA JSON
+        // -------------------------------------------------------------------------
+
+        /*
+         * Converte o objeto Esp32Packet em JSON.
+         *
+         * Esta conversão inclui:
+         * - temperatura
+         * - umidade
+         * - tensão
+         * - corrente
+         * - potência
+         * - RSSI
+         * - GPS
+         * - lux
+         * - status dos sensores
+         * - CRC
+         */
+        val jsonApi = ApiPayloadMapper.fromEsp32Packet(packet, tipoComunicacao)
+
+
+        // -------------------------------------------------------------------------
+        // DEBUG / DIAGNOSTICO
+        // -------------------------------------------------------------------------
+
+        /*
+         * Salva o JSON formatado para mostrar
+         * na tela de diagnóstico da API.
+         *
+         * O parâmetro 4 adiciona indentação.
+         */
+        ultimoJsonApi = jsonApi.toString(4)
+
+        // Atualiza mensagem de status da API.
+        statusApi = "API: enviando pacote ESP32..."
+
+
+        // -------------------------------------------------------------------------
+        // MONTA CORPO HTTP JSON
+        // -------------------------------------------------------------------------
+
+        /*
+         * Define Content-Type HTTP.
+         *
+         * application/json:
+         * indica que o corpo é JSON.
+         *
+         * charset=utf-8:
+         * codificação dos caracteres.
+         */
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+
+        /*
+         * Converte o JSONObject em corpo HTTP.
+         */
+        val body = jsonApi.toString().toRequestBody(mediaType)
+
+
+        // -------------------------------------------------------------------------
+        // MONTA REQUISICAO HTTP
+        // -------------------------------------------------------------------------
+
+        /*
+         * Cria requisição POST para a API.
+         *
+         * apiUrl:
+         * endereço do servidor Flask/REST.
+         */
+        val request = Request.Builder()
+
+            // URL da API.
+            .url(apiUrl)
+
+            // Método POST.
+            .post(body)
+
+            // Finaliza construção da requisição.
+            .build()
+
+
+        // -------------------------------------------------------------------------
+        // ENVIO ASSINCRONO COM OKHTTP
+        // -------------------------------------------------------------------------
+
+        /*
+         * enqueue():
+         * envia em background sem travar a interface do Android.
+         */
+        httpClient.newCall(request).enqueue(object : Callback {
+
+            // ---------------------------------------------------------------------
+            // FALHA DE COMUNICACAO
+            // ---------------------------------------------------------------------
+
+            override fun onFailure(call: Call, e: IOException) {
+
+                /*
+                 * mainHandler.post():
+                 * atualiza a interface na thread principal do Android.
+                 */
+                mainHandler.post {
+
+                    // Formata horário atual.
+                    val sdf = SimpleDateFormat(
+                        "HH:mm:ss",
+                        Locale.getDefault()
+                    )
+
+                    // Atualiza mensagens da tela.
+                    statusApi = "API: erro no envio"
+
+                    ultimaAtualizacaoApi =
+                        "Último envio API (FALHA) às ${
+                            sdf.format(Date())
+                        }"
+
+                    // Código especial para falha sem resposta HTTP.
+                    ultimoCodigoHttpApi = "FALHA"
+                }
+            }
+
+
+            // ---------------------------------------------------------------------
+            // RESPOSTA DA API
+            // ---------------------------------------------------------------------
+
+            override fun onResponse(call: Call, response: Response) {
+
+                /*
+                 * use():
+                 * fecha automaticamente o response depois do uso.
+                 */
+                response.use {
+
+                    // Atualiza UI na thread principal.
+                    mainHandler.post {
+
+                        // Formata horário atual.
+                        val sdf = SimpleDateFormat(
+                            "HH:mm:ss",
+                            Locale.getDefault()
+                        )
+
+                        /*
+                         * isSuccessful:
+                         * true para HTTP 200-299.
+                         */
+                        ultimaAtualizacaoApi =
+                            if (it.isSuccessful) {
+
+                                "Último envio API (OK) às ${
+                                    sdf.format(Date())
+                                }"
+
+                            } else {
+
+                                "Último envio API (ERRO ${it.code}) às ${
+                                    sdf.format(Date())
+                                }"
+                            }
+
+
+                        // Guarda código HTTP recebido.
+                        // Exemplo:
+                        // 200
+                        // 201
+                        // 400
+                        // 500
+                        ultimoCodigoHttpApi = it.code.toString()
+
+
+                        // Atualiza status mostrado na interface.
+                        statusApi =
+                            if (it.isSuccessful) {
+
+                                "API: enviado OK (${it.code})"
+
+                            } else {
+
+                                "API: erro HTTP ${it.code}"
+                            }
+                    }
+                }
+            }
+        })
     }
 
     private fun processarDadosBle(texto: String) {
@@ -330,12 +896,23 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                 btClassicoConectado = true
                 status = "Status: Clássico conectado"
 
-                val reader = BufferedReader(InputStreamReader(classicSocket!!.inputStream))
+                val input = classicSocket!!.inputStream
+                val buffer = ByteArray(45)
+
                 while (btClassicoConectado) {
-                    val linha = reader.readLine()
-                    if (linha != null) {
-                        atualizarDadosNaTela(linha)
+                    var bytesLidos = 0
+
+                    while (bytesLidos < 45) {
+                        val lidos = input.read(buffer, bytesLidos, 45 - bytesLidos)
+
+                        if (lidos == -1) {
+                            throw IOException("Bluetooth clássico desconectado")
+                        }
+
+                        bytesLidos += lidos
                     }
+
+                    processarPacoteBinarioEsp32(buffer.copyOf())
                 }
             } catch (_: Exception) {
                 btClassicoConectado = false
