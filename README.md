@@ -2,50 +2,54 @@
 
 Este projeto é uma solução completa de monitoramento IoT, atuando como um **Gateway Móvel** que coleta dados de sensores via Bluetooth (BLE ou Clássico), processa telemetria avançada e encaminha as informações para uma API de monitoramento agrícola.
 
-## 🚀 Destaques da Versão "Refatorada"
+## 🚀 Novidades e Melhorias Recentes
 
-- **Dual-Stack Bluetooth**: 
-    - **Classic (RFCOMM)**: Thread dedicada para streaming contínuo via Sockets.
-    - **BLE (GATT)**: Arquitetura baseada em eventos com negociação de MTU (100 bytes) para payloads grandes.
-- **Inteligência de Borda (Edge Computing)**:
-    - **Cálculo de Distância**: Implementação do modelo de propagação *Log-Distance Path Loss* para estimar a distância do sensor com base no RSSI.
-    - **Filtragem de Dados**: Agregação de pacotes e validação de integridade (CRC).
-- **Interface Material 3**:
-    - Dashboard dinâmico que altera o estado visual (nitidez/cinza) conforme a vitalidade da conexão.
-    - Tabela de dados alinhada com precisão.
+- **Calibração de Variável Dupla**: Agora o sistema permite o ajuste dinâmico tanto do **Fator N (Ambiente)** quanto do **RSSI de Referência (1m)**, garantindo maior precisão no cálculo de distância em diferentes cenários.
+- **Persistência por Sensor**: Os parâmetros de calibração são salvos individualmente por `codsensor` em um arquivo `calibracao.xml` interno, mantendo as configurações mesmo após reiniciar o app ou trocar de sensor.
+- **Preview em Tempo Real**: Interface de configurações com cálculo instantâneo da distância prevista conforme os valores de calibração são editados.
+- **Correção de Estabilidade**: Resolvido crash de `IllegalStateException` relacionado a contêineres de scroll aninhados no Jetpack Compose.
+
+## 📡 Comunicação BLE (Kotlin/Android)
+
+Para a comunicação com o ESP32 via BLE, o app implementa os seguintes passos críticos no Android:
+
+1.  **Negociação de MTU**: O app solicita `gatt.requestMtu(64)` logo após a conexão. Este valor é otimizado para o pacote binário de 45 bytes (considerando o overhead do protocolo), evitando o consumo desnecessário de recursos que valores muito altos como 247 causariam.
+2.  **Descoberta de Serviços e Características**: Localização do `SERVICE_UUID` e `CHARACTERISTIC_UUID` específicos definidos no firmware do ESP32.
+3.  **Habilitação de Notificações (CCCD)**: Para receber dados sem solicitar (push), é necessário configurar o descritor `00002902-0000-1000-8000-00805f9b34fb` como `ENABLE_NOTIFICATION_VALUE`.
+4.  **Leitura de RSSI Remoto**: Uso de `gatt.readRemoteRssi()` em um loop de polling (ex: 5s) para atualizar a potência do sinal e recalcular a distância do sensor continuamente.
+5.  **Decoder Binário**: Implementação de um `Esp32PacketDecoder` que valida o cabeçalho (`0xAA 0x55`) e o `CRC16` dos dados recebidos via notificações.
 
 ## 🛠 Stack Tecnológica
 
-- **Android Stack**: Kotlin 2.0, Jetpack Compose, ViewModel, LiveData.
-- **Networking**: OkHttp para persistência de dados na nuvem.
-- **Protocolo**: JSON estruturado para telemetria de solo e ambiente.
+- **Android Stack**: Kotlin 2.0, Jetpack Compose, ViewModel, Material 3.
+- **Networking**: OkHttp para persistência de dados na nuvem via REST.
+- **Serialização**: XML para configurações locais e JSON para integração com API.
 
 ## 📐 Lógica de Telemetria e Distância
 
-O app utiliza o RSSI (Received Signal Strength Indicator) para estimar a proximidade do sensor utilizando a fórmula:
+O app utiliza o modelo de propagação *Log-Distance Path Loss*:
 $$d = 10 ^ {\frac{RSSI_{ref} - RSSI_{medido}}{10 \cdot n}}$$
 
-Onde:
-- **RSSI_ref**: Potência medida a 1 metro de distância.
-- **n**: Fator de perda de percurso (ajustável conforme o ambiente, ex: Industrial = 3.0).
+- **RSSI_ref**: Valor de referência (dBm) medido a 1 metro (configurável).
+- **n**: Fator de perda de percurso (ajustável: 2.0 para campo aberto, >3.0 para ambientes com obstáculos).
 
-## 📡 Estrutura de Integração (API)
+## 📡 Estrutura da API
 
-Os dados são mapeados pelo `ApiPayloadMapper` e enviados via `ApiDatasource` no seguinte formato:
+Os dados são enviados no seguinte formato JSON:
 
 | Campo | Descrição | Exemplo |
 | :--- | :--- | :--- |
-| `codsensor` | Identificador único da TAG/ESP32 | `SENSOR_01` |
-| `distcalc_app` | Distância calculada em metros | `2.45` |
-| `scomunicacao` | Tipo de conexão (1: BLE, 2: Classic) | `1` |
-| `stensao` | Leitura de bateria/tensão do sensor | `3.30` |
-| `temp_solo` | Temperatura capturada | `25.5` |
+| `codsensor` | Identificador único (TAG) | `SENSOR_01` |
+| `distcalc_app` | Distância calculada (m) | `3.15` |
+| `ref_rssi_dbm` | RSSI de referência usado | `-59.0` |
+| `fator_n` | Fator ambiental usado | `2.1` |
+| `scomunicacao` | 1: BLE, 2: Classic | `1` |
 
 ## 📋 Como Executar
 
-1. **Permissões**: O app solicita automaticamente permissões de Scan, Connect e Localização (necessária para RSSI em BLE).
-2. **Pareamento**: Para Bluetooth Clássico, realize o pareamento nas configurações do Android com o nome `ESP32_MONITOR_BT`.
-3. **Build**: Utilize o Android Studio Ladybug ou superior com AGP 8.7.3.
+1. **Permissões**: O app gerencia permissões de `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` e `ACCESS_FINE_LOCATION`.
+2. **Firmware**: O ESP32 deve estar configurado com o Service UUID `12345678-1234-1234-1234-1234567890ab`.
+3. **Build**: Requer Android Studio Ladybug+ e AGP 8.7.3.
 
 ---
 **Desenvolvido para:** Pós-Graduação em Engenharia de Software - UTFPR.

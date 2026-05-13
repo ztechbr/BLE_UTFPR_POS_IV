@@ -13,6 +13,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -22,10 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -84,6 +90,8 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
 
     var mostrarDiagnosticoApi by remember { mutableStateOf(false) }
 
+    var mostrarConfiguracoes by remember { mutableStateOf(false) }
+
     var menuAberto by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -95,6 +103,7 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ),
                 actions = {
+                    // Navegação entre subtelas: reseta os outros estados ao abrir uma nova
                     IconButton(onClick = { menuAberto = true }) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
@@ -114,6 +123,8 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                             },
                             onClick = {
                                 menuAberto = false
+                                mostrarDiagnosticoApi = false
+                                mostrarConfiguracoes = false
                                 mostrarDiagnostico = true
                             }
                         )
@@ -126,7 +137,22 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                             },
                             onClick = {
                                 menuAberto = false
+                                mostrarDiagnostico = false
+                                mostrarConfiguracoes = false
                                 mostrarDiagnosticoApi = true
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("Configurações") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Settings, contentDescription = null)
+                            },
+                            onClick = {
+                                menuAberto = false
+                                mostrarDiagnostico = false
+                                mostrarDiagnosticoApi = false
+                                mostrarConfiguracoes = true
                             }
                         )
                     }
@@ -158,6 +184,15 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                 TelaDiagnosticoApi(
                     viewModel = viewModel,
                     onVoltar = { mostrarDiagnosticoApi = false }
+                )
+                return@Column
+            }
+
+            // Tela de Configurações
+            if (mostrarConfiguracoes) {
+                TelaConfiguracoes(
+                    viewModel = viewModel,
+                    onVoltar = { mostrarConfiguracoes = false }
                 )
                 return@Column
             }
@@ -462,6 +497,205 @@ fun TelaDiagnosticoApi(
         }
     }
 }
+@Composable
+fun TelaConfiguracoes(
+    viewModel: BluetoothViewModel,
+    onVoltar: () -> Unit
+) {
+    var fatorInput by remember { mutableStateOf(viewModel.fatorNLocal.toString()) }
+    var rssiRefInput by remember { mutableStateOf(viewModel.rssiRefLocal.toString()) }
+    var previewDistancia by remember { mutableStateOf<String?>(null) }
+
+    // Sincroniza campos quando o sensor muda
+    LaunchedEffect(viewModel.tagAtual) {
+        fatorInput = viewModel.fatorNLocal.toString()
+        rssiRefInput = viewModel.rssiRefLocal.toString()
+        previewDistancia = null
+    }
+
+    // Função para atualizar o preview em tempo real
+    fun atualizarPreview() {
+        val n = fatorInput.toDoubleOrNull()
+        val r = rssiRefInput.toDoubleOrNull()
+        val rssiLido = viewModel.getUltimoRssiApp()
+        if (n != null && r != null && rssiLido != null) {
+            val dist = viewModel.calcularDistancia(rssiLido, n, r)
+            previewDistancia = if (dist != null) "%.2f m".format(Locale.US, dist) else "Erro"
+        } else {
+            previewDistancia = null
+        }
+    }
+
+    var mostrarConfirmacao by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+
+    if (mostrarConfirmacao) {
+        AlertDialog(
+            onDismissRequest = { mostrarConfirmacao = false },
+            title = { Text("Confirmar Alteração") },
+            text = { Text("Deseja salvar o novo Fator N (${fatorInput}) e o novo RSSI de Referência (${rssiRefInput}) no arquivo de configuração?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val novoFator = fatorInput.toDoubleOrNull()
+                        val novoRssiRef = rssiRefInput.toDoubleOrNull()
+                        if (novoFator != null && novoRssiRef != null) {
+                            viewModel.salvarCalibracao(novoFator, novoRssiRef)
+                        }
+                        mostrarConfirmacao = false
+                    }
+                ) {
+                    Text("Salvar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarConfirmacao = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = "Configurações de Calibração",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold
+        )
+
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Calibração de Distância",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Text(
+                    text = "Sensor Atual: ${viewModel.tagAtual}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+
+                HorizontalDivider()
+
+                // 1. Valores Atuais
+                DataRow(
+                    label = "Fator N Atual",
+                    value = "%.2f".format(Locale.US, viewModel.fatorNLocal),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                DataRow(
+                    label = "RSSI Ref. Atual (1m)",
+                    value = "%.1f dBm".format(Locale.US, viewModel.rssiRefLocal),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                DataRow(
+                    label = "RSSI Recebido (rec)",
+                    value = viewModel.rssiBleCelular,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                DataRow(
+                    label = "Distância Atual",
+                    value = viewModel.distanciaApp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                HorizontalDivider()
+
+                // 2. Campo para editar RSSI de Referência
+                OutlinedTextField(
+                    value = rssiRefInput,
+                    onValueChange = { 
+                        rssiRefInput = it
+                        atualizarPreview()
+                    },
+                    label = { Text("Novo RSSI Ref em 1m (dBm)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next
+                    )
+                )
+
+                // 3. Campo para editar Fator N
+                OutlinedTextField(
+                    value = fatorInput,
+                    onValueChange = { 
+                        fatorInput = it
+                        atualizarPreview()
+                    },
+                    label = { Text("Novo Fator n") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            atualizarPreview()
+                            focusManager.clearFocus()
+                        }
+                    )
+                )
+
+                // 4. Preview da nova distância
+                AnimatedVisibility(visible = previewDistancia != null) {
+                    Column {
+                        DataRow(
+                            label = "Nova Distância Prevista",
+                            value = previewDistancia ?: "",
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
+                // 5. Botão de Salvar no XML
+                Button(
+                    onClick = { mostrarConfirmacao = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = viewModel.tagAtual != "--" && 
+                             fatorInput.toDoubleOrNull() != null && 
+                             rssiRefInput.toDoubleOrNull() != null
+                ) {
+                    Icon(Icons.Default.Save, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Salvar no XML")
+                }
+            }
+        }
+
+        if (viewModel.tagAtual == "--") {
+            Text(
+                text = "Conecte-se ao ESP32 para identificar o sensor antes de calibrar.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = onVoltar,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Voltar")
+        }
+    }
+}
+
 @Composable
 fun DataRow(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
     Row(

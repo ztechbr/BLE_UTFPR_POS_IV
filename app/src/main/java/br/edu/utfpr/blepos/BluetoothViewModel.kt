@@ -198,8 +198,34 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
 
     // RSSI de referência a 1 metro e fator ambiental.
     // Fórmula: d = 10 ^ ((RSSI_ref - RSSI_medido) / (10 * n))
-    private val rssiReferenciaDbm = -59.0
-    private val fatorN = 2.0
+    var rssiRefLocal by mutableStateOf(-59.0)
+        private set
+    var fatorNLocal by mutableStateOf(2.0)
+        private set
+
+    fun calcularDistancia(rssiApp: Double?, fator: Double, rssiRef: Double = rssiRefLocal): Double? {
+        if (rssiApp == null || fator <= 0.0) return null
+        return 10.0.pow((rssiRef - rssiApp) / (10.0 * fator))
+    }
+
+    fun getUltimoRssiApp(): Double? {
+        return when {
+            bleConectado -> ultimoRssiBleAppDbm
+            btClassicoConectado -> ultimoRssiClassicoAppDbm
+            else -> null
+        }
+    }
+
+    var tagAtual by mutableStateOf("--")
+        private set
+
+    fun salvarCalibracao(novoFator: Double, novoRssiRef: Double) {
+        if (tagAtual != "--") {
+            ApiPayloadMapper.saveCalibracaoToXml(getApplication(), tagAtual, novoFator, novoRssiRef)
+            fatorNLocal = novoFator
+            rssiRefLocal = novoRssiRef
+        }
+    }
 
     private val rssiHandler = Handler(Looper.getMainLooper())
 
@@ -357,9 +383,8 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 this@BluetoothViewModel.status = "Status: BLE conectado"
-                Thread.sleep(600)
-                // Aumenta o MTU para permitir JSON maior via BLE
-                gatt.requestMtu(247)
+                // Aumenta o MTU para acomodar o pacote de 45 bytes + 3 de cabeçalho GATT
+                gatt.requestMtu(64)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 bleConectado = false
                 this@BluetoothViewModel.status = "Status: BLE desconectado"
@@ -491,8 +516,17 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 // RSSI visto pelo celular Android em relação ao ESP32
-                ultimoRssiBleAppDbm = rssi.toDouble()
+                val rssiDouble = rssi.toDouble()
+                ultimoRssiBleAppDbm = rssiDouble
                 rssiBleCelular = "$rssi dBm"
+
+                // Atualiza distância em tempo real
+                if (fatorNLocal > 0.0) {
+                    val distancia = 10.0.pow(
+                        (rssiRefLocal - rssiDouble) / (10.0 * fatorNLocal)
+                    )
+                    distanciaApp = "%.2f m".format(Locale.US, distancia)
+                }
             }
         }
     }
@@ -570,11 +604,16 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
         atualizarTelaComPacoteEsp32(packet)
     }
 
-    // fim do teste
-
-
-
     private fun atualizarTelaComPacoteEsp32(packet: Esp32Packet) {
+        tagAtual = packet.tag
+        // Tenta pegar do XML se houver, senão usa o padrão do ViewModel
+        val calibracao = ApiPayloadMapper.getCalibracaoFromXml(getApplication(), packet.tag)
+        
+        if (calibracao != null) {
+            fatorNLocal = calibracao.fatorN
+            rssiRefLocal = calibracao.rssiRef
+        }
+
         /*
          * Atualiza as flags usadas na tela de diagnóstico.
          */
@@ -740,9 +779,9 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             else -> null
         }
 
-        distanciaApp = if (appRssiDbm != null && fatorN > 0.0) {
+        distanciaApp = if (appRssiDbm != null && fatorNLocal > 0.0) {
             val distancia = 10.0.pow(
-                (rssiReferenciaDbm - appRssiDbm) / (10.0 * fatorN)
+                (rssiRefLocal - appRssiDbm) / (10.0 * fatorNLocal)
             )
             "%.2f m".format(Locale.US, distancia)
         } else {
@@ -754,8 +793,8 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             packet = packet,
             tipoComunicacao = tipoComunicacao,
             appRssiDbm = appRssiDbm,
-            rssiReferenciaDbm = rssiReferenciaDbm,
-            fatorNPadrao = fatorN
+            rssiReferenciaPadrao = rssiRefLocal,
+            fatorNPadrao = fatorNLocal
         )
 
 
