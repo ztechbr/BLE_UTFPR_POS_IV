@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<calibracao>
+    <sensor>
+        <codsensor>EXEMPLO</codsensor>
+        <fator_n>4.0</fator_n>
+    </sensor>
+    <sensor>
+        <codsensor>ESP32_LAB</codsensor>
+        <fator_n>2.8</fator_n>
+    </sensor>
+</calibracao>

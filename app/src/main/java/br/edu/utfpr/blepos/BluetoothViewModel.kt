@@ -16,6 +16,7 @@ import android.bluetooth.le.ScanResult
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import kotlin.math.pow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -81,7 +82,10 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
 
     var rssiBle by mutableStateOf("--")
         private set
-
+    var rssiBleCelular by mutableStateOf("--")
+        private set
+    var distanciaApp by mutableStateOf("--")
+        private set
     var bh1750Falha by mutableStateOf(false)
         private set
 
@@ -186,6 +190,28 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
     // Para teste, vamos enviar no máximo a cada 10 segundos.
     private var ultimoEnvioApi = 0L
     private val intervaloEnvioApiMs = 10_000L
+    // RSSI visto pelo aplicativo Android.
+    // BLE: atualizado por bleGatt.readRemoteRssi()
+    // Clássico: normalmente indisponível em conexão RFCOMM.
+    private var ultimoRssiBleAppDbm: Double? = null
+    private var ultimoRssiClassicoAppDbm: Double? = null
+
+    // RSSI de referência a 1 metro e fator ambiental.
+    // Fórmula: d = 10 ^ ((RSSI_ref - RSSI_medido) / (10 * n))
+    private val rssiReferenciaDbm = -59.0
+    private val fatorN = 2.0
+
+    private val rssiHandler = Handler(Looper.getMainLooper())
+
+    private val rssiRunnable = object : Runnable {
+        @SuppressLint("MissingPermission")
+        override fun run() {
+            if (bleConectado) {
+                bleGatt?.readRemoteRssi()
+                rssiHandler.postDelayed(this, 5_000)
+            }
+        }
+    }
 
     @SuppressLint("MissingPermission")
     fun toggleBleConnection() {
@@ -243,6 +269,11 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                 val nomeScan = result.scanRecord?.deviceName ?: ""
                 val endereco = device.address
                 val rssi = result.rssi
+
+                // RSSI visto pelo celular durante o scan BLE.
+                // Este valor é inicial; depois da conexão será atualizado por readRemoteRssi().
+                ultimoRssiBleAppDbm = rssi.toDouble()
+
 
                 android.util.Log.d(
                     "BLE_SCAN",
@@ -309,11 +340,16 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
 
     @SuppressLint("MissingPermission")
     private fun desconectarBle() {
+        rssiHandler.removeCallbacks(rssiRunnable)
+
         bleGatt?.disconnect()
         bleGatt?.close()
         bleGatt = null
         bleConectado = false
+        ultimoRssiBleAppDbm = null
         status = "Status: BLE desconectado"
+        rssiBleCelular = "---"
+        distanciaApp = "---"
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -439,9 +475,24 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 bleConectado = true
                 this@BluetoothViewModel.status = "Status: BLE notificações habilitadas"
+
+                // Inicia leitura periódica do RSSI visto pelo celular.
+                rssiHandler.removeCallbacks(rssiRunnable)
+                rssiHandler.post(rssiRunnable)
             } else {
                 bleConectado = false
                 this@BluetoothViewModel.status = "Erro: BLE não habilitou notificações"
+            }
+        }
+        override fun onReadRemoteRssi(
+            gatt: BluetoothGatt,
+            rssi: Int,
+            status: Int
+        ) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                // RSSI visto pelo celular Android em relação ao ESP32
+                ultimoRssiBleAppDbm = rssi.toDouble()
+                rssiBleCelular = "$rssi dBm"
             }
         }
     }
@@ -683,7 +734,29 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
          * - status dos sensores
          * - CRC
          */
-        val jsonApi = ApiPayloadMapper.fromEsp32Packet(packet, tipoComunicacao)
+        val appRssiDbm = when (tipoComunicacao) {
+            1 -> ultimoRssiBleAppDbm
+            2 -> ultimoRssiClassicoAppDbm
+            else -> null
+        }
+
+        distanciaApp = if (appRssiDbm != null && fatorN > 0.0) {
+            val distancia = 10.0.pow(
+                (rssiReferenciaDbm - appRssiDbm) / (10.0 * fatorN)
+            )
+            "%.2f m".format(Locale.US, distancia)
+        } else {
+            "---"
+        }
+
+        val jsonApi = ApiPayloadMapper.fromEsp32Packet(
+            context = getApplication(),
+            packet = packet,
+            tipoComunicacao = tipoComunicacao,
+            appRssiDbm = appRssiDbm,
+            rssiReferenciaDbm = rssiReferenciaDbm,
+            fatorNPadrao = fatorN
+        )
 
 
         // -------------------------------------------------------------------------
@@ -797,7 +870,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                  * use():
                  * fecha automaticamente o response depois do uso.
                  */
-                response.use {
+                response.use { resp ->
 
                     // Atualiza UI na thread principal.
                     mainHandler.post {
@@ -813,7 +886,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                          * true para HTTP 200-299.
                          */
                         ultimaAtualizacaoApi =
-                            if (it.isSuccessful) {
+                            if (resp.isSuccessful) {
 
                                 "Último envio API (OK) às ${
                                     sdf.format(Date())
@@ -821,7 +894,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
 
                             } else {
 
-                                "Último envio API (ERRO ${it.code}) às ${
+                                "Último envio API (ERRO ${resp.code}) às ${
                                     sdf.format(Date())
                                 }"
                             }
@@ -833,18 +906,18 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
                         // 201
                         // 400
                         // 500
-                        ultimoCodigoHttpApi = it.code.toString()
+                        ultimoCodigoHttpApi = resp.code.toString()
 
 
                         // Atualiza status mostrado na interface.
                         statusApi =
-                            if (it.isSuccessful) {
+                            if (resp.isSuccessful) {
 
-                                "API: enviado OK (${it.code})"
+                                "API: enviado OK (${resp.code})"
 
                             } else {
 
-                                "API: erro HTTP ${it.code}"
+                                "API: erro HTTP ${resp.code}"
                             }
                     }
                 }
@@ -911,7 +984,11 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
 
                         bytesLidos += lidos
                     }
-
+                    try {
+                        ultimoRssiClassicoAppDbm =
+                            bluetoothAdapter?.getRemoteDevice(device.address)?.bondState?.toDouble()
+                    } catch (_: Exception) {
+                    }
                     processarPacoteBinarioEsp32(buffer.copyOf())
                 }
             } catch (_: Exception) {
@@ -1109,25 +1186,25 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val resposta = it.body?.string() ?: ""
+                response.use { resp ->
+                    val resposta = resp.body?.string() ?: ""
 
                     mainHandler.post {
                         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
                         // SEMPRE atualiza o horário (independente de erro ou sucesso)
-                        ultimaAtualizacaoApi = if (it.isSuccessful) {
+                        ultimaAtualizacaoApi = if (resp.isSuccessful) {
                             "Último envio API (OK) às ${sdf.format(Date())}"
                         } else {
-                            "Último envio API (ERRO ${it.code}) às ${sdf.format(Date())}"
+                            "Último envio API (ERRO ${resp.code}) às ${sdf.format(Date())}"
                         }
 
-                        ultimoCodigoHttpApi = it.code.toString()
+                        ultimoCodigoHttpApi = resp.code.toString()
 
-                        statusApi = if (it.isSuccessful) {
-                            "API: enviado OK (${it.code})"
+                        statusApi = if (resp.isSuccessful) {
+                            "API: enviado OK (${resp.code})"
                         } else {
-                            "API: erro HTTP ${it.code}"
+                            "API: erro HTTP ${resp.code}"
                         }
                     }
                 }
@@ -1138,6 +1215,7 @@ class BluetoothViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         super.onCleared()
         watchdogHandler.removeCallbacks(watchdogRunnable)
+        rssiHandler.removeCallbacks(rssiRunnable)
         desconectarBle()
         desconectarBluetoothClassico()
     }

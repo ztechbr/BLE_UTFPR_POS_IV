@@ -216,7 +216,7 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                 }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 3.dp))
 
             // Seção de Dados (Tabela)
             Text(
@@ -234,7 +234,7 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                         //.fillMaxSize()
                         //.verticalScroll(rememberScrollState())
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     val contentColor = if (viewModel.estaComunicando) 
                         MaterialTheme.colorScheme.onSurface 
@@ -249,7 +249,9 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                     DataRow(label = "Lux", value = viewModel.luximetro, color = contentColor)
                     DataRow(label = "Latitude", value = viewModel.latitude, color = contentColor)
                     DataRow(label = "Longitude", value = viewModel.longitude, color = contentColor)
-                    DataRow(label = "RSSI BLE", value = viewModel.rssiBle, color = contentColor)
+                    DataRow(label = "RSSI ESP32", value = viewModel.rssiBle, color = contentColor)
+                    DataRow(label = "RSSI Celular", value = viewModel.rssiBleCelular, color = contentColor)
+                    DataRow(label = "Distância APP", value = viewModel.distanciaApp, color = contentColor)
                     DataRow(label = "Diagnóstico", value = viewModel.diagnosticoSensores, color = contentColor)
                 }
             }
