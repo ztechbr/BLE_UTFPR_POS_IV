@@ -37,7 +37,7 @@ object Esp32PacketDecoder {
     const val PACKET_SIZE = 45
 
     /*
-     * Função principal de decodificação.
+     * Função principal de descodificação.
      *
      * Entrada:
      * - ByteArray recebido via BLE ou Bluetooth Clássico.

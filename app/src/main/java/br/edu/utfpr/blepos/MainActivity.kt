@@ -130,7 +130,7 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                         )
                         // Chama tela de diagnostico da API
                         if (viewModel.apiEnvioAtivo)
-                        DropdownMenuItem(
+                            DropdownMenuItem(
                             text = { Text("Diagnóstico da API") },
                             leadingIcon = {
                                 Icon(Icons.Default.CloudUpload, contentDescription = null)
@@ -304,7 +304,7 @@ fun BluetoothScreen(viewModel: BluetoothViewModel) {
                     textAlign = TextAlign.Center
                 )
             }
-            // INICIO ALTERACAO - Seção API
+            // Seção API
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Text(
@@ -512,7 +512,6 @@ fun TelaConfiguracoes(
         rssiRefInput = viewModel.rssiRefLocal.toString()
         previewDistancia = null
     }
-
     // Função para atualizar o preview em tempo real
     fun atualizarPreview() {
         val n = fatorInput.toDoubleOrNull()
@@ -576,40 +575,33 @@ fun TelaConfiguracoes(
                     text = "Calibração de Distância",
                     style = MaterialTheme.typography.titleMedium
                 )
-
                 Text(
                     text = "Sensor Atual: ${viewModel.tagAtual}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline
                 )
-
                 HorizontalDivider()
-
                 // 1. Valores Atuais
                 DataRow(
                     label = "Fator N Atual",
                     value = "%.2f".format(Locale.US, viewModel.fatorNLocal),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                
                 DataRow(
                     label = "RSSI Ref. Atual (1m)",
                     value = "%.1f dBm".format(Locale.US, viewModel.rssiRefLocal),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-
                 DataRow(
                     label = "RSSI Recebido (rec)",
                     value = viewModel.rssiBleCelular,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-
                 DataRow(
                     label = "Distância Atual",
                     value = viewModel.distanciaApp,
                     color = MaterialTheme.colorScheme.primary
                 )
-
                 HorizontalDivider()
 
                 // 2. Campo para editar RSSI de Referência
@@ -626,7 +618,6 @@ fun TelaConfiguracoes(
                         imeAction = ImeAction.Next
                     )
                 )
-
                 // 3. Campo para editar Fator N
                 OutlinedTextField(
                     value = fatorInput,
@@ -647,7 +638,6 @@ fun TelaConfiguracoes(
                         }
                     )
                 )
-
                 // 4. Preview da nova distância
                 AnimatedVisibility(visible = previewDistancia != null) {
                     Column {
@@ -659,7 +649,6 @@ fun TelaConfiguracoes(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
-
                 // 5. Botão de Salvar no XML
                 Button(
                     onClick = { mostrarConfirmacao = true },
@@ -695,7 +684,6 @@ fun TelaConfiguracoes(
         }
     }
 }
-
 @Composable
 fun DataRow(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
     Row(
