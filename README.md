@@ -9,6 +9,14 @@ Este projeto é uma solução completa de monitoramento IoT, atuando como um **G
 - **Preview em Tempo Real**: Interface de configurações com cálculo instantâneo da distância prevista conforme os valores de calibração são editados.
 - **Correção de Estabilidade**: Resolvido crash de `IllegalStateException` relacionado a contêineres de scroll aninhados no Jetpack Compose.
 
+## 🏗️ Arquitetura MVVM (Model-View-ViewModel)
+
+O projeto segue o padrão de arquitetura **MVVM**, promovendo a separação de responsabilidades e facilitando a manutenção:
+
+-   **Model**: Representado pelas classes de dados e repositórios. O `BluetoothRepository` gerencia a comunicação de baixo nível com o hardware e APIs externas, enquanto o `Esp32PacketDecoder` lida com a lógica de processamento de pacotes brutos.
+-   **View**: Implementada com **Jetpack Compose**. A UI é reativa e "observa" as mudanças de estado no ViewModel. Não contém lógica de negócio, apenas exibe os dados e repassa eventos do usuário (toques, entradas de texto).
+-   **ViewModel**: O `BluetoothViewModel` é o cérebro da UI. Ele expõe estados (como `temperatura`, `status`, `bleConectado`) usando `mutableStateOf` do Compose e encapsula a lógica de interação entre a View e o Model (ex: disparar uma conexão ou salvar calibração).
+
 ## 📡 Comunicação BLE (Kotlin/Android)
 
 Para a comunicação com o ESP32 via BLE, o app implementa os seguintes passos críticos no Android:

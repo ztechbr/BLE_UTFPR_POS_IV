@@ -133,14 +133,31 @@ class BleDatasource(
 
     @SuppressLint("MissingPermission")
     fun startScan() {
-        val scanner = bluetoothAdapter?.bluetoothLeScanner
+        if (isScanning) return
+
+        // Garante que qualquer conexão anterior seja fechada antes de um novo scan
+        disconnect()
+
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            onStatusChanged("Erro: Bluetooth desativado")
+            return
+        }
+
+        bluetoothAdapter.cancelDiscovery()
+
+        val scanner = bluetoothAdapter.bluetoothLeScanner
         if (scanner == null) {
             onStatusChanged("Erro: scanner BLE indisponível")
             return
         }
+
+        val settings = android.bluetooth.le.ScanSettings.Builder()
+            .setScanMode(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
         onStatusChanged("Status: procurando BLE...")
         isScanning = true
-        scanner.startScan(scanCallback)
+        scanner.startScan(null, settings, scanCallback)
         
         mainHandler.postDelayed({
             if (isScanning) {
@@ -160,6 +177,13 @@ class BleDatasource(
 
     @SuppressLint("MissingPermission")
     private fun conectarGatt(device: BluetoothDevice) {
+        // Evita vazamento fechando qualquer conexão existente antes de abrir uma nova
+        bleGatt?.let {
+            it.disconnect()
+            it.close()
+        }
+        bleGatt = null
+        
         onStatusChanged("Status: conectando GATT...")
         bleGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
@@ -172,8 +196,10 @@ class BleDatasource(
     @SuppressLint("MissingPermission")
     fun disconnect() {
         stopScan()
-        bleGatt?.disconnect()
-        bleGatt?.close()
+        bleGatt?.let { gatt ->
+            gatt.disconnect()
+            gatt.close()
+        }
         bleGatt = null
         onConnectionStateChanged(false)
         onStatusChanged("Status: BLE desconectado")
