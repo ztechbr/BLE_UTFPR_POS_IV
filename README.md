@@ -1,73 +1,65 @@
-# ESP32 IoT Monitor & Gateway (BLE/Classic)
+# Gateway IoT para Monitoramento de Sensores (ESP32)
 
-Este projeto é uma solução completa de monitoramento IoT, atuando como um **Gateway Móvel** que coleta dados de sensores via Bluetooth (BLE ou Clássico), processa telemetria avançada e encaminha as informações para uma API de monitoramento agrícola.
+Este projeto foi desenvolvido como uma solução de monitoramento para agricultura inteligente, funcionando como um Gateway Móvel que integra sensores via Bluetooth (BLE e Clássico) e encaminha os dados para uma central de análise.
 
-## 🚀 Novidades e Melhorias Recentes
+## Novidades e Melhorias do Projeto
 
-- **Calibração de Variável Dupla**: Agora o sistema permite o ajuste dinâmico tanto do **Fator N (Ambiente)** quanto do **RSSI de Referência (1m)**, garantindo maior precisão no cálculo de distância em diferentes cenários.
-- **Persistência por Sensor**: Os parâmetros de calibração são salvos individualmente por `codsensor` em um arquivo `calibracao.xml` interno, mantendo as configurações mesmo após reiniciar o app ou trocar de sensor.
-- **Preview em Tempo Real**: Interface de configurações com cálculo instantâneo da distância prevista conforme os valores de calibração são editados.
-- **Correção de Estabilidade**: Resolvido crash de `IllegalStateException` relacionado a contêineres de scroll aninhados no Jetpack Compose.
+- **Calibração de Variável Dupla**: O sistema agora permite o ajuste dinâmico do Fator N (ambiente) e do RSSI de Referência (1m), trazendo maior precisão no cálculo de distância.
+- **Persistência por Sensor**: As configurações de calibração são salvas individualmente por dispositivo no arquivo `calibracao.xml`, mantendo os ajustes mesmo após reiniciar o aplicativo.
+- **Interface em Tempo Real**: Telas de configuração com pré-visualização instantânea do cálculo de distância conforme os parâmetros são editados.
+- **Estabilidade da Interface**: Correção de falhas de renderização em listas e contêineres de scroll no Jetpack Compose.
 
-## 🏗️ Arquitetura MVVM (Model-View-ViewModel)
+## Arquitetura de Software (MVVM)
 
-O projeto segue o padrão de arquitetura **MVVM**, promovendo a separação de responsabilidades e facilitando a manutenção:
+O desenvolvimento segue o padrão MVVM para garantir um código organizado e de fácil manutenção:
 
--   **Model**: Representado pelas classes de dados e repositórios. O `BluetoothRepository` gerencia a comunicação de baixo nível com o hardware e APIs externas, enquanto o `Esp32PacketDecoder` lida com a lógica de processamento de pacotes brutos.
--   **View**: Implementada com **Jetpack Compose**. A UI é reativa e "observa" as mudanças de estado no ViewModel. Não contém lógica de negócio, apenas exibe os dados e repassa eventos do usuário (toques, entradas de texto).
--   **ViewModel**: O `BluetoothViewModel` é o cérebro da UI. Ele expõe estados (como `temperatura`, `status`, `bleConectado`) usando `mutableStateOf` do Compose e encapsula a lógica de interação entre a View e o Model (ex: disparar uma conexão ou salvar calibração).
+- **Model**: Responsável pelos dados e lógica de baixo nível. Inclui o `BluetoothRepository` para comunicação de hardware e o `Esp32PacketDecoder` para o processamento de pacotes.
+- **View**: Construída com Jetpack Compose, garantindo uma interface reativa que reflete automaticamente o estado dos sensores.
+- **ViewModel**: O `BluetoothViewModel` gerencia o estado da aplicação e serve como ponte entre a interface e os repositórios de dados.
 
-## 📡 Comunicação BLE (Kotlin/Android)
+## Implementação da Comunicação BLE
 
-Para a comunicação com o ESP32 via BLE, o app implementa os seguintes passos críticos no Android:
+A comunicação com o ESP32 foi otimizada para garantir estabilidade e baixo consumo:
 
-1.  **Negociação de MTU**: O app solicita `gatt.requestMtu(64)` logo após a conexão. Este valor é otimizado para o pacote binário de 45 bytes (considerando o overhead do protocolo), evitando o consumo desnecessário de recursos que valores muito altos como 247 causariam.
-2.  **Descoberta de Serviços e Características**: Localização do `SERVICE_UUID` e `CHARACTERISTIC_UUID` específicos definidos no firmware do ESP32.
-3.  **Habilitação de Notificações (CCCD)**: Para receber dados sem solicitar (push), é necessário configurar o descritor `00002902-0000-1000-8000-00805f9b34fb` como `ENABLE_NOTIFICATION_VALUE`.
-4.  **Leitura de RSSI Remoto**: Uso de `gatt.readRemoteRssi()` em um loop de polling (ex: 5s) para atualizar a potência do sinal e recalcular a distância do sensor continuamente.
-5.  **Otimização via Protocolo Binário (Compactação, Validação e Segurança)**: 
-    A transição do formato JSON (que gerava payloads entre 300 e 380 bytes) para uma codificação binária proprietária foi fundamental para a estabilidade do sistema. O volume de dados anterior excedia os limites ideais do BLE para eficiência energética e causava travamentos na comunicação, além de sobrecarregar a memória RAM do ESP32. Esta codificação binária tem como objetivo **compactar, validar e otimizar o código com segurança e economia de dados de envio**:
-    - **Compactação**: Redução drástica do payload para um pacote fixo de apenas 45 bytes, otimizando o tráfego de rádio.
-    - **Validação de Integridade**: Uso de um cabeçalho de sincronismo (`0xAA 0x55`) e verificação via `CRC16` para garantir que apenas dados íntegros sejam processados.
-    - **Eficiência e Segurança**: Minimização do tempo de rádio ativo e proteção contra pacotes corrompidos, garantindo a escalabilidade e a autonomia do sensor.
+1.  **Negociação de MTU**: O aplicativo solicita 64 bytes logo após a conexão, o que é ideal para o nosso pacote de 45 bytes, evitando desperdício de recursos.
+2.  **Descoberta de Serviços**: Localização precisa dos canais de comunicação (UUIDs) definidos no firmware.
+3.  **Sistema de Notificações**: Configuração do descritor CCCD para que o sensor envie dados proativamente, eliminando a necessidade de consultas constantes.
+4.  **Monitoramento de Sinal (RSSI)**: Leitura periódica da potência do sinal para atualização contínua da distância calculada.
+5.  **Otimização via Protocolo Binário**: Substituímos o uso de JSON (que gerava pacotes pesados de até 380 bytes) por uma estrutura binária compacta de apenas 45 bytes. Isso resolveu problemas de memória no ESP32 e aumentou a autonomia da bateria.
 
-## 🛠 Stack Tecnológica
+## Tecnologias Utilizadas
 
-- **Android Stack**: Kotlin 2.0, Jetpack Compose, ViewModel, Material 3.
-- **Networking**: OkHttp para persistência de dados na nuvem via REST.
-- **Serialização**: XML para configurações locais e JSON para integração com API.
+- **Plataforma Android**: Kotlin 2.0, Jetpack Compose, Material Design 3.
+- **Comunicação**: Bluetooth Low Energy (BLE) e Bluetooth Classic.
+- **Networking e Persistência**: OkHttp para API REST e XML para configurações locais.
 
-## 📐 Lógica de Telemetria e Distância
+## Cálculo de Telemetria e Distância
 
-O app utiliza o modelo de propagação *Log-Distance Path Loss*:
+O sistema utiliza o modelo matemático Log-Distance Path Loss:
 $$d = 10 ^ {\frac{RSSI_{ref} - RSSI_{medido}}{10 \cdot n}}$$
 
-- **RSSI_ref**: Valor de referência (dBm) medido a 1 metro (configurável).
-- **n**: Fator de perda de percurso (ajustável: 2.0 para campo aberto, >3.0 para ambientes com obstáculos).
+Onde o **RSSI_ref** é a potência a 1 metro e o **n** é o fator de perda ambiental, ambos ajustáveis pelo usuário para melhor calibração em campo.
 
-## 📡 Estrutura da API
+## Materiais de Workshop e Publicação
 
-Os dados são enviados no seguinte formato JSON:
+Abaixo estão os arquivos utilizados na apresentação do Workshop e o artigo técnico detalhando a solução:
 
-| Campo | Descrição | Exemplo |
-| :--- | :--- | :--- |
-| `codsensor` | Identificador único (TAG) | `SENSOR_01` |
-| `distcalc_app` | Distância calculada (m) | `3.15` |
-| `ref_rssi_dbm` | RSSI de referência usado | `-59.0` |
-| `fator_n` | Fator ambiental usado | `2.1` |
-| `scomunicacao` | 1: BLE, 2: Classic | `1` |
+- [Artigo Técnico: BLE aplicado a IoT em Agricultura Inteligente](https://github.com/ztechbr/BLE_UTFPR_POS_IV/blob/main/Projeto-ESP32-BLE/Apresentacao/Artigo-BLE%20aplicado%20a%20IoT%20em%20Agricultura%20Inteligente.pdf)
+- [Apresentação do Projeto (PDF)](https://github.com/ztechbr/BLE_UTFPR_POS_IV/blob/main/Projeto-ESP32-BLE/Apresentacao/Apresenta%C3%A7%C3%A3o%20BLE%20na%20Agricultura%20Inteligente.pdf)
+- [Demonstração em Vídeo: Aplicação em Campo](https://github.com/ztechbr/BLE_UTFPR_POS_IV/blob/main/Projeto-ESP32-BLE/Apresentacao/Aplica%C3%A7%C3%A3o%20BLE.mp4)
+- [API BlueSensores (Monitoramento em Tempo Real)](https://api-sensores.ztechnologies.io/)
 
-## 🔗 Repositórios Complementares
+## Repositórios Complementares
 
 Este ecossistema IoT conta com outros componentes essenciais:
-*   **API de Monitoramento (Backend)**: [Servidor API BlueSensores](https://github.com/ztechbr/ServidoAPI_Projeto_BlueSensores_UTFPR) - Responsável por receber, validar e armazenar as telemetrias enviadas pelo Gateway.
-*   **App de Visualização (Frontend)**: [Leitura API & Gráficos](https://github.com/ztechbr/APPLeituraAPI_Projeto_BlueSensores_UTFPR) - Aplicativo complementar para consulta dos dados históricos e visualização gráfica dos sensores.
+*   **API de Monitoramento (Backend)**: [Servidor API BlueSensores](https://github.com/ztechbr/ServidoAPI_Projeto_BlueSensores_UTFPR) - Recebe e armazena as telemetrias.
+*   **App de Visualização (Frontend)**: [Leitura API & Gráficos](https://github.com/ztechbr/APPLeituraAPI_Projeto_BlueSensores_UTFPR) - Consulta histórica e gráficos.
 
-## 📋 Como Executar
+## Instruções de Execução
 
-1. **Permissões**: O app gerencia permissões de `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` e `ACCESS_FINE_LOCATION`.
-2. **Firmware**: O ESP32 deve estar configurado com o Service UUID `12345678-1234-1234-1234-1234567890ab`.
-3. **Build**: Requer Android Studio Ladybug+ e AGP 8.7.3.
+1. **Permissões**: Certifique-se de conceder acesso ao Bluetooth e Localização.
+2. **Firmware**: O ESP32 deve estar com o Service UUID `12345678-1234-1234-1234-1234567890ab`.
+3. **Ambiente**: Requer Android Studio Ladybug ou superior e AGP 8.7.3.
 
 ---
 **Desenvolvido para:** Pós-Graduação em Programação de Dispositivos Móveis - UTFPR.
