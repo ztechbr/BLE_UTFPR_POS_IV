@@ -25,7 +25,11 @@ Para a comunicação com o ESP32 via BLE, o app implementa os seguintes passos c
 2.  **Descoberta de Serviços e Características**: Localização do `SERVICE_UUID` e `CHARACTERISTIC_UUID` específicos definidos no firmware do ESP32.
 3.  **Habilitação de Notificações (CCCD)**: Para receber dados sem solicitar (push), é necessário configurar o descritor `00002902-0000-1000-8000-00805f9b34fb` como `ENABLE_NOTIFICATION_VALUE`.
 4.  **Leitura de RSSI Remoto**: Uso de `gatt.readRemoteRssi()` em um loop de polling (ex: 5s) para atualizar a potência do sinal e recalcular a distância do sensor continuamente.
-5.  **Decoder Binário**: Implementação de um `Esp32PacketDecoder` que valida o cabeçalho (`0xAA 0x55`) e o `CRC16` dos dados recebidos via notificações.
+5.  **Otimização via Protocolo Binário (Compactação, Validação e Segurança)**: 
+    A transição do formato JSON (que gerava payloads entre 300 e 380 bytes) para uma codificação binária proprietária foi fundamental para a estabilidade do sistema. O volume de dados anterior excedia os limites ideais do BLE para eficiência energética e causava travamentos na comunicação, além de sobrecarregar a memória RAM do ESP32. Esta codificação binária tem como objetivo **compactar, validar e otimizar o código com segurança e economia de dados de envio**:
+    - **Compactação**: Redução drástica do payload para um pacote fixo de apenas 45 bytes, otimizando o tráfego de rádio.
+    - **Validação de Integridade**: Uso de um cabeçalho de sincronismo (`0xAA 0x55`) e verificação via `CRC16` para garantir que apenas dados íntegros sejam processados.
+    - **Eficiência e Segurança**: Minimização do tempo de rádio ativo e proteção contra pacotes corrompidos, garantindo a escalabilidade e a autonomia do sensor.
 
 ## 🛠 Stack Tecnológica
 
@@ -60,4 +64,4 @@ Os dados são enviados no seguinte formato JSON:
 3. **Build**: Requer Android Studio Ladybug+ e AGP 8.7.3.
 
 ---
-**Desenvolvido para:** Pós-Graduação em Engenharia de Software - UTFPR.
+**Desenvolvido para:** Pós-Graduação em Programação de Dispositivos Móveis - UTFPR.
