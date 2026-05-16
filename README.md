@@ -57,6 +57,12 @@ Os dados são enviados no seguinte formato JSON:
 | `fator_n` | Fator ambiental usado | `2.1` |
 | `scomunicacao` | 1: BLE, 2: Classic | `1` |
 
+## 🔗 Repositórios Complementares
+
+Este ecossistema IoT conta com outros componentes essenciais:
+*   **API de Monitoramento (Backend)**: [Servidor API BlueSensores](https://github.com/ztechbr/ServidoAPI_Projeto_BlueSensores_UTFPR) - Responsável por receber, validar e armazenar as telemetrias enviadas pelo Gateway.
+*   **App de Visualização (Frontend)**: [Leitura API & Gráficos](https://github.com/ztechbr/APPLeituraAPI_Projeto_BlueSensores_UTFPR) - Aplicativo complementar para consulta dos dados históricos e visualização gráfica dos sensores.
+
 ## 📋 Como Executar
 
 1. **Permissões**: O app gerencia permissões de `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` e `ACCESS_FINE_LOCATION`.
